@@ -161,17 +161,29 @@ class AnthropicProvider(BaseLLMProvider):
             # Build messages
             messages = [{"role": "user", "content": prompt}]
 
+            # Build request kwargs - only include system if present
+            request_kwargs: Dict[str, Any] = {
+                "model": self._model_id,
+                "max_tokens": min(config.max_tokens, self.max_output_tokens),
+                "messages": messages,
+                "temperature": config.temperature,
+            }
+
+            # Only add system prompt if provided (API rejects None or empty)
+            if config.system_prompt:
+                request_kwargs["system"] = config.system_prompt
+
+            # Only add optional params if they have values
+            if config.top_p is not None:
+                request_kwargs["top_p"] = config.top_p
+            if config.stop_sequences:
+                request_kwargs["stop_sequences"] = config.stop_sequences
+
+            # Add any extra kwargs
+            request_kwargs.update(config.extra)
+
             # Make request
-            response = self._client.messages.create(
-                model=self._model_id,
-                max_tokens=min(config.max_tokens, self.max_output_tokens),
-                messages=messages,
-                system=config.system_prompt if config.system_prompt else None,
-                temperature=config.temperature,
-                top_p=config.top_p,
-                stop_sequences=config.stop_sequences if config.stop_sequences else None,
-                **config.extra,
-            )
+            response = self._client.messages.create(**request_kwargs)
 
             # Calculate latency
             latency_ms = (time.time() - start_time) * 1000
@@ -263,15 +275,23 @@ class AnthropicProvider(BaseLLMProvider):
 
             messages = [{"role": "user", "content": content}]
 
+            # Build request kwargs - only include system if present
+            request_kwargs: Dict[str, Any] = {
+                "model": self._model_id,
+                "max_tokens": min(config.max_tokens, self.max_output_tokens),
+                "messages": messages,
+                "temperature": config.temperature,
+            }
+
+            # Only add system prompt if provided
+            if config.system_prompt:
+                request_kwargs["system"] = config.system_prompt
+
+            # Add any extra kwargs
+            request_kwargs.update(config.extra)
+
             # Make request
-            response = self._client.messages.create(
-                model=self._model_id,
-                max_tokens=min(config.max_tokens, self.max_output_tokens),
-                messages=messages,
-                system=config.system_prompt if config.system_prompt else None,
-                temperature=config.temperature,
-                **config.extra,
-            )
+            response = self._client.messages.create(**request_kwargs)
 
             # Calculate latency
             latency_ms = (time.time() - start_time) * 1000
