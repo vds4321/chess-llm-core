@@ -2,6 +2,11 @@
 
 Shared LLM abstraction layer for chess coaching applications.
 
+## Products Using This Library
+
+- [YourChessDotComCoach](https://github.com/vds4321/YourChessDotComCoach) - Adult chess coaching (live at yourchessdotcomcoach.fly.dev)
+- [KasparChess](https://github.com/vds4321/KasparChess) - Parent-focused coaching for children (live at [kasparchess.com](https://kasparchess.com))
+
 ## Features
 
 - **Protocol-based LLM Provider Abstraction**: Flexible interface supporting multiple LLM providers
