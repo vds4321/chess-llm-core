@@ -1,11 +1,13 @@
 """
-Usage and cost tracking for LLM providers.
+Usage and cost tracking sub-package.
 
-This module provides:
-- Request/response logging
-- Cost tracking per request
-- Usage aggregation
-- Budget monitoring
+Provides per-request recording, aggregate metrics, and budget enforcement
+for all LLM calls made through the library.
+
+Exports:
+    - ``UsageTracker`` -- the core tracker class.
+    - ``UsageRecord``  -- a single request record.
+    - ``get_tracker()`` / ``reset_tracker()`` -- global singleton management.
 """
 
 from chess_llm.tracking.usage import (

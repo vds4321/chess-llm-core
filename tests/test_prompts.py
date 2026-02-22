@@ -6,7 +6,7 @@ from chess_llm.config.models import ModelTier
 from chess_llm.prompts.base import PromptTemplate, PromptVersion
 from chess_llm.prompts.coaching.mentor_insights import MentorInsightsPrompt
 from chess_llm.prompts.extraction.key_areas import KeyAreasExtractionPrompt
-from chess_llm.prompts.scouting.battle_plan import BattlePlanPrompt
+from chess_llm.prompts.scouting.battle_plan import BattlePlanPrompt, _calc_color_win_rate
 
 
 class TestPromptVersion:
@@ -244,18 +244,11 @@ class TestBattlePlanPrompt:
         assert metadata["player_games"] == 200
 
     def test_color_win_rate_calculation(self, opponent_stats, player_stats):
-        """Test color win rate calculation."""
-        prompt = BattlePlanPrompt(
-            opponent_username="Opponent123",
-            player_username="Player456",
-            opponent_stats=opponent_stats,
-            player_stats=player_stats,
-        )
-
+        """Test color win rate calculation (module-level helper)."""
         # Opponent: 45/75 = 60% white win rate
-        assert prompt._calc_color_win_rate(opponent_stats, "white") == 60.0
+        assert _calc_color_win_rate(opponent_stats, "white") == 60.0
         # Opponent: 30/75 = 40% black win rate
-        assert prompt._calc_color_win_rate(opponent_stats, "black") == 40.0
+        assert _calc_color_win_rate(opponent_stats, "black") == 40.0
 
     def test_handles_empty_stats(self):
         """Test handling empty statistics."""

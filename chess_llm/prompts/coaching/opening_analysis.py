@@ -1,7 +1,18 @@
 """
 Opening analysis prompt template.
 
-Generates insights about specific opening performance and recommendations.
+Generates targeted coaching advice for a specific opening based on the
+player's win rate, game count, and observed mistakes.  The output is a
+concise 150-200 word markdown analysis covering:
+
+    1. Win-rate assessment (concerning / acceptable / good)
+    2. One key idea to focus on
+    3. A common pitfall to avoid
+    4. One specific improvement suggestion
+
+Maintenance:
+    Bump ``PromptVersion`` when changing prompt wording.  Validate via
+    ``kaspar_eval`` to ensure quality.
 """
 
 from dataclasses import dataclass, field
@@ -14,31 +25,45 @@ from chess_llm.prompts.base import PromptTemplate, PromptVersion, OutputFormat
 @dataclass
 class OpeningAnalysisPrompt(PromptTemplate):
     """
-    Generate opening-specific coaching insights.
+    Generate coaching insights for a specific chess opening.
 
-    This prompt analyzes performance in a specific opening and provides
-    targeted advice for improvement.
+    Recommended tier:
+        ``STANDARD`` -- needs chess knowledge for accurate advice.
 
-    Recommended tier: STANDARD (needs chess knowledge for good advice)
+    Attributes:
+        opening_name:    Name of the opening (e.g. ``"Sicilian Defense"``).
+        win_rate:        Player's win rate in this opening (0-100).
+        games_count:     Number of games played in this opening.
+        player_color:    ``"white"`` or ``"black"``.
+        common_mistakes: Optional list of observed mistake descriptions.
+        typical_positions: Optional FEN strings of key positions.
+        opponent_level:  ``"similar"``, ``"higher"``, or ``"lower"``.
     """
 
+    # -- Prompt metadata ----------------------------------------------------
     prompt_id: str = "opening_analysis"
-    version: PromptVersion = field(default_factory=lambda: PromptVersion(1, 0, 0, "Initial version"))
+    version: PromptVersion = field(
+        default_factory=lambda: PromptVersion(1, 0, 0, "Initial version")
+    )
     recommended_tier: ModelTier = ModelTier.STANDARD
     output_format: OutputFormat = OutputFormat.MARKDOWN
     estimated_input_tokens: int = 800
     estimated_output_tokens: int = 400
 
-    # Required parameters
+    # -- Required parameters ------------------------------------------------
     opening_name: str = ""
     win_rate: float = 0.0
     games_count: int = 0
-    player_color: str = "white"  # "white" or "black"
+    player_color: str = "white"
 
-    # Optional context
+    # -- Optional context ---------------------------------------------------
     common_mistakes: Optional[List[str]] = None
-    typical_positions: Optional[List[str]] = None  # FEN strings
-    opponent_level: Optional[str] = None  # e.g., "similar", "higher", "lower"
+    typical_positions: Optional[List[str]] = None
+    opponent_level: Optional[str] = None
+
+    # -----------------------------------------------------------------------
+    # Rendering
+    # -----------------------------------------------------------------------
 
     def render(self) -> str:
         """Render the opening analysis prompt."""
@@ -69,8 +94,12 @@ Be practical and actionable. Reference the opening's typical strategic themes.""
 
         return prompt
 
+    # -----------------------------------------------------------------------
+    # Validation
+    # -----------------------------------------------------------------------
+
     def validate(self) -> List[str]:
-        """Validate prompt parameters."""
+        """Ensure required fields are present and sensible."""
         errors = []
         if not self.opening_name:
             errors.append("opening_name is required")

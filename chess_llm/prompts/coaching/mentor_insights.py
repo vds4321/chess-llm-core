@@ -1,8 +1,27 @@
 """
 Mentor coaching insights prompt template.
 
-Generates personalized coaching insights based on comprehensive player analysis.
-This is the main coaching prompt used in report generation.
+Generates a personalised coaching report based on comprehensive player
+analysis.  This is the **primary coaching prompt** used by KasparChess and
+YourChessDotComCoach for report generation.
+
+The prompt is designed to produce *mentor-style* advice -- encouraging but
+honest, insight-driven rather than stat-driven -- in markdown format with
+consistent section headers that downstream code can parse.
+
+Output sections:
+    1. "What I See in Your Games"  -- playing style analysis
+    2. "Your Biggest Opportunity"  -- single highest-impact focus area
+    3. "Watch Out For"             -- bad habits / blind spots
+    4. "Your Path Forward"         -- actionable next steps
+
+Maintenance:
+    When updating the prompt text, bump ``PromptVersion`` and test via
+    ``kaspar_eval`` to verify output quality has not regressed.
+
+    The data parameters (``stats``, ``progression``, etc.) are populated
+    by the chess.com API layer in the consuming applications -- see their
+    respective docs for the expected dict shapes.
 """
 
 from dataclasses import dataclass, field
@@ -15,30 +34,43 @@ from chess_llm.prompts.base import PromptTemplate, PromptVersion, OutputFormat
 @dataclass
 class MentorInsightsPrompt(PromptTemplate):
     """
-    Generate mentor-style coaching insights.
+    Generate mentor-style coaching insights from player data.
 
-    This prompt analyzes comprehensive player data and produces personalized
-    coaching advice including:
-    - Playing style analysis
-    - Key improvement opportunities
-    - Specific warnings about bad habits
-    - Actionable next steps
+    Analyses comprehensive player statistics (game outcomes, opening
+    performance, behavioural patterns, Chess960 data, time-control
+    analysis) and produces a ~600-word personalised coaching message.
 
-    Recommended tier: STANDARD (requires good reasoning for personalized advice)
+    Recommended tier:
+        ``STANDARD`` -- requires solid reasoning for personalised advice.
+
+    Attributes:
+        username:             The player's display name.
+        stats:                Core game statistics dict.
+        progression:          Recent-vs-historical win-rate comparison.
+        behavioral_patterns:  Time pressure, tactical awareness, etc.
+        trouble_spots:        Openings with < 40 % win rate.
+        deep_chess960:        Chess960-vs-standard comparison data.
+        recent_month_analysis: What changed in the most recent month.
+        time_control_errors:  Performance breakdown by time control.
+        opponent_style:       Performance against different play styles.
+        platform:             Chess platform (default: ``"chess.com"``).
     """
 
+    # -- Prompt metadata ----------------------------------------------------
     prompt_id: str = "mentor_insights"
-    version: PromptVersion = field(default_factory=lambda: PromptVersion(1, 0, 0, "Initial version"))
+    version: PromptVersion = field(
+        default_factory=lambda: PromptVersion(1, 0, 0, "Initial version")
+    )
     recommended_tier: ModelTier = ModelTier.STANDARD
     output_format: OutputFormat = OutputFormat.MARKDOWN
     estimated_input_tokens: int = 1500
     estimated_output_tokens: int = 1500
 
-    # Required parameters
+    # -- Required parameters ------------------------------------------------
     username: str = ""
     stats: Dict[str, Any] = field(default_factory=dict)
 
-    # Optional enhanced data
+    # -- Optional enhanced data ---------------------------------------------
     progression: Optional[Dict[str, Any]] = None
     behavioral_patterns: Optional[Dict[str, Any]] = None
     trouble_spots: Optional[List[Dict[str, Any]]] = None
@@ -48,9 +80,12 @@ class MentorInsightsPrompt(PromptTemplate):
     opponent_style: Optional[Dict[str, Any]] = None
     platform: str = "chess.com"
 
+    # -----------------------------------------------------------------------
+    # Rendering
+    # -----------------------------------------------------------------------
+
     def render(self) -> str:
         """Render the complete mentor insights prompt."""
-        # Calculate derived stats
         total_games = self.stats.get("total_games", 0)
         white_games = self.stats.get("white_games", 1)
         black_games = self.stats.get("black_games", 1)
@@ -60,15 +95,14 @@ class MentorInsightsPrompt(PromptTemplate):
         white_win_rate = round(white_wins / max(white_games, 1) * 100, 1)
         black_win_rate = round(black_wins / max(black_games, 1) * 100, 1)
 
-        # Build context sections
+        progression = self.progression or {}
+        trouble_spots = self.trouble_spots or []
+
+        # Assemble optional context sections
         deep_960_text = self._format_chess960_insights()
         recent_changes_text = self._format_recent_changes()
         tc_errors_text = self._format_time_control_errors()
         opp_style_text = self._format_opponent_style()
-
-        # Format progression data
-        progression = self.progression or {}
-        trouble_spots = self.trouble_spots or []
 
         prompt = f"""You are an experienced chess mentor having a one-on-one coaching session with {self.username}.
 You've performed a DEEP analysis of their last 6 months of games. Share your most important observations.
@@ -147,21 +181,40 @@ Keep the entire response under 600 words. Be a mentor, not a statistician."""
         return prompt
 
     def render_system_prompt(self) -> Optional[str]:
-        """Provide system context for the mentor role."""
+        """System context that establishes the mentor persona."""
         return (
             "You are an experienced chess coach providing personalized mentoring. "
             "You have deep expertise in chess strategy, tactics, and player development. "
             "Your coaching style is encouraging but honest, focusing on actionable insights."
         )
 
+    # -----------------------------------------------------------------------
+    # Validation
+    # -----------------------------------------------------------------------
+
+    def validate(self) -> List[str]:
+        """Ensure the minimum required data is present."""
+        errors = []
+        if not self.username:
+            errors.append("username is required")
+        if not self.stats:
+            errors.append("stats dictionary is required")
+        if not self.stats.get("total_games"):
+            errors.append("stats must contain total_games")
+        return errors
+
+    # -----------------------------------------------------------------------
+    # Private formatting helpers
+    # -----------------------------------------------------------------------
+
     def _get_behavioral(self, key: str, default: str) -> str:
-        """Get a behavioral pattern value."""
+        """Safely retrieve a value from ``behavioral_patterns``."""
         if self.behavioral_patterns:
             return self.behavioral_patterns.get(key, default)
         return default
 
     def _format_trouble_spots(self, spots: List[Dict[str, Any]]) -> str:
-        """Format trouble spots as bullet list."""
+        """Render up to 5 trouble-spot openings as a bullet list."""
         if not spots:
             return "- None detected"
         lines = []
@@ -173,7 +226,7 @@ Keep the entire response under 600 words. Be a mentor, not a statistician."""
         return "\n".join(lines)
 
     def _format_chess960_insights(self) -> str:
-        """Format Chess960 analysis section."""
+        """Render the Chess960-vs-standard comparison section."""
         if not self.deep_chess960 or self.deep_chess960.get("insufficient_data"):
             return "- No Chess960 data available"
 
@@ -182,9 +235,13 @@ Keep the entire response under 600 words. Be a mentor, not a statistician."""
         comps = self.deep_chess960.get("comparisons", {})
         deep_insights = self.deep_chess960.get("deep_insights", [])
 
-        text = f"""- Chess960: {c960.get('total', 0)} games, {c960.get('win_rate', 0)}% win rate
-- Standard: {std.get('win_rate', 0)}% win rate
-- Win rate difference: {comps.get('win_rate_diff', 0):+.1f}% (positive = better at 960)"""
+        text = (
+            f"- Chess960: {c960.get('total', 0)} games, "
+            f"{c960.get('win_rate', 0)}% win rate\n"
+            f"- Standard: {std.get('win_rate', 0)}% win rate\n"
+            f"- Win rate difference: "
+            f"{comps.get('win_rate_diff', 0):+.1f}% (positive = better at 960)"
+        )
 
         if deep_insights:
             text += "\n**CRITICAL Chess960 vs Standard Analysis:**"
@@ -196,21 +253,24 @@ Keep the entire response under 600 words. Be a mentor, not a statistician."""
         return text
 
     def _format_recent_changes(self) -> str:
-        """Format recent month changes section."""
-        if not self.recent_month_analysis or self.recent_month_analysis.get("insufficient_data"):
+        """Render the 'what changed this month' section."""
+        if not self.recent_month_analysis or self.recent_month_analysis.get(
+            "insufficient_data"
+        ):
             return ""
 
         changes = self.recent_month_analysis.get("changes", [])
         if not changes:
             return ""
 
-        text = f"\n**What Changed This Month ({self.recent_month_analysis.get('recent_month', 'recent')}):**"
+        month = self.recent_month_analysis.get("recent_month", "recent")
+        text = f"\n**What Changed This Month ({month}):**"
         for change in changes[:4]:
             text += f"\n- [{change.get('type', '')}] {change.get('detail', '')}"
         return text
 
     def _format_time_control_errors(self) -> str:
-        """Format time control error patterns."""
+        """Render time-control performance patterns."""
         if not self.time_control_errors:
             return ""
 
@@ -232,7 +292,7 @@ Keep the entire response under 600 words. Be a mentor, not a statistician."""
         return text
 
     def _format_opponent_style(self) -> str:
-        """Format opponent style insights."""
+        """Render performance-by-opponent-style insights."""
         if not self.opponent_style or self.opponent_style.get("insufficient_data"):
             return ""
 
@@ -244,14 +304,3 @@ Keep the entire response under 600 words. Be a mentor, not a statistician."""
         for p in patterns[:3]:
             text += f"\n- {p.get('detail', '')}"
         return text
-
-    def validate(self) -> List[str]:
-        """Validate prompt parameters."""
-        errors = []
-        if not self.username:
-            errors.append("username is required")
-        if not self.stats:
-            errors.append("stats dictionary is required")
-        if not self.stats.get("total_games"):
-            errors.append("stats must contain total_games")
-        return errors

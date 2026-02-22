@@ -1,37 +1,53 @@
 """
-Provider registry for managing LLM providers.
+Provider registry for managing LLM provider instances.
 
-The registry allows:
-- Getting providers by name or tier
-- Registering custom providers
-- Listing available providers
+The registry uses a **factory pattern** to decouple provider creation from
+consumer code.  Providers are registered as lightweight factory callables
+and instantiated on demand, which also means optional dependencies (like
+the ``anthropic`` SDK) are only imported when actually needed.
 
-Usage:
+Public API::
+
     from chess_llm.providers import get_provider
     from chess_llm.config.models import ModelTier
 
-    # Get provider by name (uses default model)
-    provider = get_provider("anthropic")
+    # Default provider + default tier (from settings)
+    provider = get_provider()
 
-    # Get provider for a specific tier
+    # Explicit provider and tier
     provider = get_provider("anthropic", tier=ModelTier.CHEAP)
 
-    # Get provider with specific model
+    # Explicit model ID
     provider = get_provider("anthropic", model_id="claude-3-5-haiku-20241022")
+
+Extending with custom providers::
+
+    from chess_llm.providers.registry import register_provider
+
+    register_provider("my_provider", my_factory_function)
+
+Maintenance:
+    Built-in providers are lazily registered via
+    ``_ensure_default_providers_registered()``.  To add a new built-in
+    provider, write a ``_register_<name>()`` helper and call it from there.
 """
 
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional
 
 from chess_llm.providers.base import LLMProvider, BaseLLMProvider
 from chess_llm.config.models import ModelTier
 from chess_llm.config.settings import get_settings
 
-
-# Type for provider factory functions
+# Type alias for callables that create provider instances.
 ProviderFactory = Callable[..., LLMProvider]
 
-# Registry of provider factories
+# Internal registry: provider_id -> factory callable
 _providers: Dict[str, ProviderFactory] = {}
+
+
+# ---------------------------------------------------------------------------
+# Public registration / look-up functions
+# ---------------------------------------------------------------------------
 
 
 def register_provider(
@@ -40,15 +56,16 @@ def register_provider(
     override: bool = False,
 ) -> None:
     """
-    Register a provider factory.
+    Register a provider factory under *provider_id*.
 
     Args:
-        provider_id: Unique identifier for the provider (e.g., 'anthropic')
-        factory: Factory function or class that creates provider instances
-        override: If True, allows overriding existing registrations
+        provider_id: Unique identifier (e.g. ``"anthropic"``).
+        factory:     Callable that returns an ``LLMProvider`` instance.
+        override:    Set ``True`` to replace an existing registration.
 
     Raises:
-        ValueError: If provider already registered and override=False
+        ValueError: If *provider_id* is already registered and
+                    *override* is ``False``.
     """
     if provider_id in _providers and not override:
         raise ValueError(
@@ -65,26 +82,28 @@ def get_provider(
     **kwargs: Any,
 ) -> LLMProvider:
     """
-    Get a provider instance.
+    Create and return a provider instance.
+
+    Resolution order for the provider name:
+        1. Explicit *provider_id* argument.
+        2. ``Settings.default_provider`` (from environment / config).
 
     Args:
-        provider_id: Provider identifier (e.g., 'anthropic'). Uses settings default if not provided.
-        tier: Model tier to use. Ignored if model_id is specified.
-        model_id: Specific model to use. Overrides tier.
-        **kwargs: Additional arguments passed to the provider constructor.
+        provider_id: Provider identifier.  Falls back to settings default.
+        tier:        Model tier.  Ignored when *model_id* is set.
+        model_id:    Explicit model.  Overrides *tier*.
+        **kwargs:    Extra arguments forwarded to the provider constructor.
 
     Returns:
-        LLMProvider instance
+        A ready-to-use ``LLMProvider`` instance.
 
     Raises:
-        ValueError: If provider not found or not available
+        ValueError: If the provider is unknown or unavailable.
     """
-    # Use settings default if no provider specified
     if provider_id is None:
         settings = get_settings()
         provider_id = settings.default_provider
 
-    # Ensure provider is registered
     _ensure_default_providers_registered()
 
     if provider_id not in _providers:
@@ -94,16 +113,13 @@ def get_provider(
             f"Available providers: {available}"
         )
 
-    factory = _providers[provider_id]
-
-    # Build kwargs for the factory
-    factory_kwargs = dict(kwargs)
+    factory_kwargs: Dict[str, Any] = dict(kwargs)
     if tier is not None:
         factory_kwargs["tier"] = tier
     if model_id is not None:
         factory_kwargs["model_id"] = model_id
 
-    return factory(**factory_kwargs)
+    return _providers[provider_id](**factory_kwargs)
 
 
 def get_provider_for_tier(
@@ -112,66 +128,56 @@ def get_provider_for_tier(
     **kwargs: Any,
 ) -> LLMProvider:
     """
-    Get a provider configured for a specific tier.
-
-    Convenience function for getting tier-based providers.
+    Convenience wrapper: get a provider configured for a specific tier.
 
     Args:
-        tier: Model tier (CHEAP, STANDARD, PREMIUM)
-        provider_id: Provider to use. Uses settings default if not provided.
-        **kwargs: Additional provider arguments.
-
-    Returns:
-        LLMProvider instance configured for the tier
+        tier:        Desired model tier.
+        provider_id: Provider to use (falls back to settings default).
+        **kwargs:    Forwarded to ``get_provider()``.
     """
     return get_provider(provider_id=provider_id, tier=tier, **kwargs)
 
 
 def list_providers() -> List[str]:
-    """
-    List all registered provider IDs.
-
-    Returns:
-        List of provider identifiers
-    """
+    """Return a list of all registered provider identifiers."""
     _ensure_default_providers_registered()
     return list(_providers.keys())
 
 
 def is_provider_available(provider_id: str) -> bool:
     """
-    Check if a provider is available (registered and dependencies installed).
+    Check whether *provider_id* is registered **and** its runtime
+    dependencies are importable.
 
-    Args:
-        provider_id: Provider identifier to check
-
-    Returns:
-        True if provider is available
+    Returns ``False`` for unknown providers or missing packages.
     """
     _ensure_default_providers_registered()
 
     if provider_id not in _providers:
         return False
 
-    # Try to instantiate to check if dependencies are available
+    # Verify that the required SDK package is importable.
+    _IMPORT_CHECK = {
+        "anthropic": "anthropic",
+        "openai": "openai",
+    }
+    package = _IMPORT_CHECK.get(provider_id)
+    if package is None:
+        return True  # No external dependency (e.g. "local")
     try:
-        # For anthropic, check if the package is installed
-        if provider_id == "anthropic":
-            import anthropic
-            return True
-        elif provider_id == "openai":
-            import openai
-            return True
-        elif provider_id == "local":
-            # Local provider doesn't require external packages
-            return True
+        __import__(package)
         return True
     except ImportError:
         return False
 
 
+# ---------------------------------------------------------------------------
+# Lazy registration of built-in providers
+# ---------------------------------------------------------------------------
+
+
 def _ensure_default_providers_registered() -> None:
-    """Register default providers if not already registered."""
+    """Register the built-in providers on first access."""
     if "anthropic" not in _providers:
         _register_anthropic()
     if "openai" not in _providers:
@@ -181,16 +187,19 @@ def _ensure_default_providers_registered() -> None:
 
 
 def _register_anthropic() -> None:
-    """Register Anthropic provider."""
+    """Register the Anthropic (Claude) provider factory."""
+
     def factory(**kwargs: Any) -> LLMProvider:
         from chess_llm.providers.anthropic import AnthropicProvider
+
         return AnthropicProvider(**kwargs)
 
     register_provider("anthropic", factory)
 
 
 def _register_openai() -> None:
-    """Register OpenAI provider (stub)."""
+    """Register the OpenAI provider factory (stub -- not yet implemented)."""
+
     def factory(**kwargs: Any) -> LLMProvider:
         raise NotImplementedError(
             "OpenAI provider not yet implemented. "
@@ -201,7 +210,8 @@ def _register_openai() -> None:
 
 
 def _register_local() -> None:
-    """Register local provider (stub)."""
+    """Register the local / Ollama provider factory (stub)."""
+
     def factory(**kwargs: Any) -> LLMProvider:
         raise NotImplementedError(
             "Local provider not yet implemented. "

@@ -1,15 +1,38 @@
 """
 Key improvement areas extraction prompt.
 
-Extracts structured data from coaching reports for progress tracking.
-Uses CHEAP tier since this is primarily data extraction, not generation.
+Extracts structured JSON data from a free-text coaching report so that
+downstream systems can track player progress over time.  This is a
+**data extraction** task (not creative generation), so the CHEAP tier is
+recommended to minimise cost.
+
+Output schema::
+
+    {
+        "main_weakness":       str,
+        "improvement_areas":   [str, str, str],
+        "opening_issues":      [str, ...],
+        "behavioral_patterns": {
+            "time_pressure":      str,
+            "tactical_awareness": str,
+            "endgame_skill":      str
+        },
+        "win_rate_at_report":  float,
+        "games_at_report":     int,
+        "strengths":           [str, str],
+        "recommended_focus":   str
+    }
+
+Maintenance:
+    If the JSON schema changes, bump ``PromptVersion`` and update the
+    ``parse_response()`` fallback dict to match.
 """
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from chess_llm.config.models import ModelTier
-from chess_llm.prompts.base import PromptTemplate, PromptVersion, OutputFormat
+from chess_llm.prompts.base import PromptTemplate, PromptVersion, OutputFormat, _extract_json
 
 
 @dataclass
@@ -17,29 +40,41 @@ class KeyAreasExtractionPrompt(PromptTemplate):
     """
     Extract key improvement areas from a coaching report.
 
-    This prompt extracts structured data for future progress tracking,
-    including main weaknesses, improvement areas, and behavioral patterns.
+    Converts free-text mentor insights into a structured JSON object for
+    storage, comparison, and progress tracking.
 
-    Recommended tier: CHEAP (data extraction task, doesn't need complex reasoning)
+    Recommended tier:
+        ``CHEAP`` -- this is a data-extraction task, not creative writing.
+
+    Attributes:
+        report_content:   Full text of the coaching report.
+        stats:            Player statistics at time of report.
+        max_report_chars: Truncation limit to stay within token budgets.
     """
 
+    # -- Prompt metadata ----------------------------------------------------
     prompt_id: str = "key_areas_extraction"
-    version: PromptVersion = field(default_factory=lambda: PromptVersion(1, 0, 0, "Initial version"))
+    version: PromptVersion = field(
+        default_factory=lambda: PromptVersion(1, 0, 0, "Initial version")
+    )
     recommended_tier: ModelTier = ModelTier.CHEAP
     output_format: OutputFormat = OutputFormat.JSON
     estimated_input_tokens: int = 2000
     estimated_output_tokens: int = 600
 
-    # Required parameters
+    # -- Required parameters ------------------------------------------------
     report_content: str = ""
     stats: Dict[str, Any] = field(default_factory=dict)
 
-    # Maximum report length to include (truncate if longer)
+    # -- Configuration ------------------------------------------------------
     max_report_chars: int = 4000
 
+    # -----------------------------------------------------------------------
+    # Rendering
+    # -----------------------------------------------------------------------
+
     def render(self) -> str:
-        """Render the key areas extraction prompt."""
-        # Calculate stats for context
+        """Render the extraction prompt with embedded report content."""
         total_games = self.stats.get("total_games", 0)
         wins = self.stats.get("wins", 0)
         white_wins = self.stats.get("white_wins", 0)
@@ -51,12 +86,16 @@ class KeyAreasExtractionPrompt(PromptTemplate):
         white_win_rate = round(white_wins / max(white_games, 1) * 100, 1)
         black_win_rate = round(black_wins / max(black_games, 1) * 100, 1)
 
-        # Truncate report if too long
-        report_text = self.report_content[:self.max_report_chars]
+        # Truncate long reports to respect token budgets
+        report_text = self.report_content[: self.max_report_chars]
         if len(self.report_content) > self.max_report_chars:
             report_text += "\n...[truncated]"
 
-        primary_tc = self.stats.get("time_control_analysis", {}).get("primary_category", "Unknown")
+        primary_tc = (
+            self.stats.get("time_control_analysis", {}).get(
+                "primary_category", "Unknown"
+            )
+        )
 
         prompt = f"""Analyze this chess coaching report and extract the key improvement areas for future comparison.
 
@@ -90,8 +129,12 @@ Return ONLY valid JSON, no other text."""
 
         return prompt
 
+    # -----------------------------------------------------------------------
+    # Validation
+    # -----------------------------------------------------------------------
+
     def validate(self) -> List[str]:
-        """Validate prompt parameters."""
+        """Ensure required data is present."""
         errors = []
         if not self.report_content:
             errors.append("report_content is required")
@@ -99,32 +142,27 @@ Return ONLY valid JSON, no other text."""
             errors.append("stats dictionary is required")
         return errors
 
+    # -----------------------------------------------------------------------
+    # Response parsing
+    # -----------------------------------------------------------------------
+
     def parse_response(self, response: str) -> Dict[str, Any]:
-        """Parse the JSON response with fallback handling."""
-        import json
+        """
+        Parse the JSON response with a graceful fallback.
 
-        text = response.strip()
-
-        # Handle markdown code blocks
-        if text.startswith("```"):
-            lines = text.split("\n")
-            # Remove first and last lines if they're code block markers
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-            text = "\n".join(lines)
-
-        # Remove "json" prefix if present
-        if text.startswith("json"):
-            text = text[4:].strip()
-
+        If the LLM produces malformed JSON, returns a minimal dict with
+        ``extraction_failed: True`` so the caller can handle the error
+        without crashing.
+        """
         try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            # Return minimal fallback data
+            return _extract_json(response)
+        except (ValueError, KeyError):
             return {
-                "win_rate_at_report": self.stats.get("wins", 0) / max(self.stats.get("total_games", 1), 1) * 100,
+                "win_rate_at_report": (
+                    self.stats.get("wins", 0)
+                    / max(self.stats.get("total_games", 1), 1)
+                    * 100
+                ),
                 "games_at_report": self.stats.get("total_games", 0),
                 "extraction_failed": True,
             }

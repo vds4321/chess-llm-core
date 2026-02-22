@@ -1,111 +1,161 @@
-"""Battle Plan prompt for scouting/opponent analysis."""
+"""
+Battle plan prompt for opponent scouting and pre-game preparation.
+
+Generates a detailed battle plan for a player to beat a specific opponent
+based on both players' statistical profiles.  The output is a structured
+JSON object with:
+
+    - Overall game plan
+    - Per-colour strategies (White and Black)
+    - Opponent weaknesses to target
+    - Opponent strengths to avoid
+    - Concrete opening recommendations with first moves
+
+Note:
+    On Chess.com and Lichess, players do NOT choose their colour -- it is
+    assigned randomly.  The prompt explicitly instructs the LLM to prepare
+    for *both* colours rather than suggesting the player "choose" one.
+
+Maintenance:
+    Bump ``PromptVersion`` when changing prompt text.  The JSON output
+    schema is consumed directly by the KasparChess frontend, so any
+    structural changes require a coordinated update.
+"""
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from chess_llm.config.models import ModelTier
-from chess_llm.prompts.base import PromptTemplate
+from chess_llm.prompts.base import PromptTemplate, PromptVersion, OutputFormat
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers for opening-stat formatting
+# ---------------------------------------------------------------------------
+
+
+def _calc_color_win_rate(stats: Dict[str, Any], color: str) -> float:
+    """Calculate win rate for *color* (``"white"`` or ``"black"``)."""
+    wins = stats.get(f"{color}_wins", 0)
+    games = stats.get(f"{color}_games", 1)
+    return round(wins / games * 100, 1) if games > 0 else 0.0
+
+
+def _format_openings(opening_stats: Dict[str, Any], limit: int = 5) -> str:
+    """Render the top *limit* openings as a bullet list sorted by usage."""
+    if not opening_stats:
+        return "- No opening data available"
+
+    sorted_openings = sorted(
+        opening_stats.items(),
+        key=lambda x: (-x[1].get("total_games", 0), -x[1].get("win_rate", 0)),
+    )[:limit]
+
+    lines = [
+        f"- {name}: {data.get('total_games', 0)} games, "
+        f"{data.get('win_rate', 0)}% win rate"
+        for name, data in sorted_openings
+    ]
+    return "\n".join(lines) if lines else "- No opening data available"
+
+
+def _get_weak_openings(
+    opening_stats: Dict[str, Any],
+    min_games: int = 3,
+    limit: int = 3,
+) -> str:
+    """Find the weakest openings by win rate (minimum *min_games*)."""
+    candidates = [
+        (name, data)
+        for name, data in opening_stats.items()
+        if data.get("total_games", 0) >= min_games
+    ]
+    weak = sorted(candidates, key=lambda x: x[1].get("win_rate", 100))[:limit]
+
+    if not weak:
+        return "- No significant weak openings detected"
+
+    return "\n".join(
+        f"- {name}: {data['win_rate']}% win rate ({data['total_games']} games)"
+        for name, data in weak
+    )
+
+
+def _get_best_openings(opening_stats: Dict[str, Any], limit: int = 3) -> str:
+    """Find the strongest openings by win rate."""
+    best = sorted(
+        opening_stats.items(),
+        key=lambda x: (-x[1].get("win_rate", 0), -x[1].get("total_games", 0)),
+    )[:limit]
+
+    if not best:
+        return "- No data available"
+
+    return "\n".join(
+        f"- {name}: {data['win_rate']}% win rate ({data['total_games']} games)"
+        for name, data in best
+    )
+
+
+# ---------------------------------------------------------------------------
+# Prompt template
+# ---------------------------------------------------------------------------
 
 
 @dataclass
 class BattlePlanPrompt(PromptTemplate):
     """
-    Prompt for generating a battle plan against a specific opponent.
+    Generate a battle plan for *player_username* to beat *opponent_username*.
 
-    This analyzes the opponent's playing patterns and creates
-    actionable strategies for how to beat them.
+    Analyses both players' statistics (openings, colour win rates, loss
+    methods) and produces an aggressive, actionable scouting report with
+    concrete opening recommendations.
+
+    Recommended tier:
+        ``STANDARD`` -- requires strategic reasoning and chess knowledge.
 
     Attributes:
-        opponent_username: The opponent to scout
-        player_username: The player receiving the battle plan
-        opponent_stats: Dict with opponent's game statistics
-        player_stats: Dict with player's own statistics
+        opponent_username: Display name of the opponent to scout.
+        player_username:   Display name of the player receiving the plan.
+        opponent_stats:    Game statistics dict for the opponent.
+        player_stats:      Game statistics dict for the player.
     """
 
+    # -- Prompt metadata ----------------------------------------------------
     prompt_id: str = field(default="battle_plan", init=False)
     version: str = field(default="1.0.0", init=False)
     recommended_tier: ModelTier = field(default=ModelTier.STANDARD, init=False)
 
+    # -- Required parameters ------------------------------------------------
     opponent_username: str = ""
     player_username: str = ""
     opponent_stats: Dict[str, Any] = field(default_factory=dict)
     player_stats: Dict[str, Any] = field(default_factory=dict)
 
-    def _calc_color_win_rate(self, stats: Dict[str, Any], color: str) -> float:
-        """Calculate win rate for a specific color."""
-        color_wins = stats.get(f"{color}_wins", 0)
-        color_games = stats.get(f"{color}_games", 1)
-        return round(color_wins / color_games * 100, 1) if color_games > 0 else 0.0
-
-    def _format_openings_for_scouting(self, opening_stats: Dict[str, Any]) -> str:
-        """Format opening statistics for the prompt."""
-        if not opening_stats:
-            return "- No opening data available"
-
-        sorted_openings = sorted(
-            opening_stats.items(),
-            key=lambda x: (-x[1].get("total_games", 0), -x[1].get("win_rate", 0))
-        )[:5]
-
-        lines = []
-        for name, data in sorted_openings:
-            games = data.get("total_games", 0)
-            win_rate = data.get("win_rate", 0)
-            lines.append(f"- {name}: {games} games, {win_rate}% win rate")
-
-        return "\n".join(lines) if lines else "- No opening data available"
-
-    def _get_opponent_weak_openings(self) -> str:
-        """Find opponent's weakest openings (as Black)."""
-        opening_stats = self.opponent_stats.get("opening_stats", {})
-
-        weak_openings = sorted(
-            [(name, data) for name, data in opening_stats.items()
-             if data.get("total_games", 0) >= 3],
-            key=lambda x: x[1].get("win_rate", 100)
-        )[:3]
-
-        if not weak_openings:
-            return "- No significant weak openings detected"
-
-        return "\n".join([
-            f"- {name}: {data['win_rate']}% win rate ({data['total_games']} games)"
-            for name, data in weak_openings
-        ])
-
-    def _get_player_best_openings(self) -> str:
-        """Find player's best openings by win rate."""
-        opening_stats = self.player_stats.get("opening_stats", {})
-
-        best_openings = sorted(
-            opening_stats.items(),
-            key=lambda x: (-x[1].get("win_rate", 0), -x[1].get("total_games", 0))
-        )[:3]
-
-        if not best_openings:
-            return "- No data available"
-
-        return "\n".join([
-            f"- {name}: {data['win_rate']}% win rate ({data['total_games']} games)"
-            for name, data in best_openings
-        ])
+    # -----------------------------------------------------------------------
+    # Rendering
+    # -----------------------------------------------------------------------
 
     def render(self) -> str:
-        """Render the battle plan prompt."""
-        opponent_openings = self._format_openings_for_scouting(
+        """Render the full battle plan prompt."""
+        opp_openings = _format_openings(
             self.opponent_stats.get("opening_stats", {})
         )
-        player_openings = self._format_openings_for_scouting(
+        player_openings = _format_openings(
             self.player_stats.get("opening_stats", {})
         )
-        opponent_weak_str = self._get_opponent_weak_openings()
-        player_best_str = self._get_player_best_openings()
+        opponent_weak = _get_weak_openings(
+            self.opponent_stats.get("opening_stats", {})
+        )
+        player_best = _get_best_openings(
+            self.player_stats.get("opening_stats", {})
+        )
 
-        opp_white_wr = self._calc_color_win_rate(self.opponent_stats, "white")
-        opp_black_wr = self._calc_color_win_rate(self.opponent_stats, "black")
-        player_white_wr = self._calc_color_win_rate(self.player_stats, "white")
-        player_black_wr = self._calc_color_win_rate(self.player_stats, "black")
-        loss_methods = self.opponent_stats.get('loss_methods', {})
+        opp_white_wr = _calc_color_win_rate(self.opponent_stats, "white")
+        opp_black_wr = _calc_color_win_rate(self.opponent_stats, "black")
+        player_white_wr = _calc_color_win_rate(self.player_stats, "white")
+        player_black_wr = _calc_color_win_rate(self.player_stats, "black")
+        loss_methods = self.opponent_stats.get("loss_methods", {})
 
         return f"""You are a chess coach preparing a battle plan for {self.player_username} to BEAT {self.opponent_username}.
 Focus entirely on how {self.player_username} can WIN this match using their strengths against the opponent's weaknesses.
@@ -115,9 +165,9 @@ OPPONENT ({self.opponent_username}) - THE TARGET:
 - White win rate: {opp_white_wr}%
 - Black win rate: {opp_black_wr}%
 - Their openings:
-{opponent_openings}
+{opp_openings}
 - Their WEAKEST openings (exploit these!):
-{opponent_weak_str}
+{opponent_weak}
 - How they lose: {loss_methods}
 
 YOUR PLAYER ({self.player_username}) - STRENGTHS TO LEVERAGE:
@@ -125,7 +175,7 @@ YOUR PLAYER ({self.player_username}) - STRENGTHS TO LEVERAGE:
 - White win rate: {player_white_wr}%
 - Black win rate: {player_black_wr}%
 - Their best openings (highest win rate):
-{player_best_str}
+{player_best}
 - Their most played openings:
 {player_openings}
 
@@ -159,9 +209,13 @@ Be aggressive and actionable. This is a battle plan to WIN, not a neutral analys
 
 IMPORTANT: On Chess.com and Lichess, players do NOT get to choose their color - it's assigned randomly. Never suggest "choosing" to play White or Black. Instead, provide preparation for BOTH colors since either could happen."""
 
+    # -----------------------------------------------------------------------
+    # Metadata
+    # -----------------------------------------------------------------------
+
     @property
     def metadata(self) -> Dict[str, Any]:
-        """Return prompt metadata."""
+        """Return prompt metadata including both player identifiers."""
         return {
             "prompt_id": self.prompt_id,
             "version": self.version,

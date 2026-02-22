@@ -1,10 +1,9 @@
 """
-Configuration module for chess-llm-core.
+Configuration sub-package for chess-llm-core.
 
-Provides:
-- Model tier definitions (cheap, standard, premium)
-- Model configurations with pricing
-- Environment-based settings
+Exports:
+    - Model tier definitions and per-model configurations (``models`` module)
+    - Environment-based settings and global singleton (``settings`` module)
 """
 
 from chess_llm.config.models import (

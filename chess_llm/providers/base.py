@@ -1,29 +1,74 @@
 """
-Base LLM provider protocol and types.
+Base LLM provider protocol and shared types.
 
-This module defines the abstract interface that all LLM providers must implement.
-Using Protocol (PEP 544) enables structural subtyping - implementations don't need
-to explicitly inherit, they just need to implement the required methods.
+This module defines the abstract interface that every LLM provider must
+implement, along with the data classes used to configure requests and
+represent responses.
+
+Architecture:
+    ``LLMProvider`` is defined as a ``Protocol`` (PEP 544), enabling
+    *structural* subtyping -- a class only needs to implement the
+    required methods/properties; explicit inheritance is optional.
+
+    ``BaseLLMProvider`` is a convenience ABC that provides shared
+    plumbing (cost calculation, token estimation, default config).
+    Concrete providers (e.g. ``AnthropicProvider``) should inherit
+    from it.
+
+Exception hierarchy::
+
+    ProviderError
+    ├── RateLimitError       (retry_after hint)
+    ├── AuthenticationError  (invalid / missing API key)
+    └── TokenLimitError      (prompt exceeds context window)
+
+Maintenance:
+    To add a new provider, subclass ``BaseLLMProvider`` and implement
+    all abstract methods.  Register the provider in
+    ``chess_llm.providers.registry``.
+
+Security:
+    The ``BaseLLMProvider.__repr__`` masks the stored API key so that
+    accidental ``print()`` or logging calls never expose secrets.
 """
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 
-class ProviderError(Exception):
-    """Base exception for provider errors."""
+# ---------------------------------------------------------------------------
+# Exception hierarchy
+# ---------------------------------------------------------------------------
 
-    def __init__(self, message: str, provider: str = "", details: Optional[Dict[str, Any]] = None):
+
+class ProviderError(Exception):
+    """Base exception for all provider-related errors.
+
+    Attributes:
+        provider: Identifier of the provider that raised the error.
+        details:  Optional dict with extra diagnostic information.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        provider: str = "",
+        details: Optional[Dict[str, Any]] = None,
+    ):
         super().__init__(message)
         self.provider = provider
         self.details = details or {}
 
 
 class RateLimitError(ProviderError):
-    """Raised when provider rate limit is exceeded."""
+    """The provider's rate limit has been exceeded.
+
+    Attributes:
+        retry_after: Suggested delay (in seconds) before retrying, if the
+                     provider supplied one.
+    """
 
     def __init__(
         self,
@@ -37,13 +82,18 @@ class RateLimitError(ProviderError):
 
 
 class AuthenticationError(ProviderError):
-    """Raised when API authentication fails."""
+    """API authentication failed (invalid or missing key)."""
 
     pass
 
 
 class TokenLimitError(ProviderError):
-    """Raised when token limit is exceeded."""
+    """The request exceeds the model's token limit.
+
+    Attributes:
+        requested_tokens: How many tokens the request needed.
+        max_tokens:       The model's maximum context size.
+    """
 
     def __init__(
         self,
@@ -58,9 +108,25 @@ class TokenLimitError(ProviderError):
         self.max_tokens = max_tokens
 
 
+# ---------------------------------------------------------------------------
+# Request configuration
+# ---------------------------------------------------------------------------
+
+
 @dataclass
 class LLMConfig:
-    """Configuration for an LLM request."""
+    """
+    Per-request configuration for an LLM call.
+
+    Attributes:
+        max_tokens:      Maximum number of tokens to generate.
+        temperature:     Sampling temperature (0.0 = deterministic).
+        top_p:           Nucleus sampling threshold.
+        stop_sequences:  Stop strings that terminate generation.
+        system_prompt:   Optional system-level instruction.
+        extra:           Provider-specific key-value pairs forwarded
+                         directly to the underlying API.
+    """
 
     max_tokens: int = 1024
     temperature: float = 0.7
@@ -68,75 +134,106 @@ class LLMConfig:
     stop_sequences: List[str] = field(default_factory=list)
     system_prompt: Optional[str] = None
 
-    # Provider-specific options
     extra: Dict[str, Any] = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Response types
+# ---------------------------------------------------------------------------
 
 
 @dataclass
 class UsageStats:
-    """Token usage statistics from a response."""
+    """
+    Token usage and cost breakdown for a single LLM response.
+
+    Attributes:
+        input_tokens:  Tokens consumed by the prompt.
+        output_tokens: Tokens generated by the model.
+        total_tokens:  Sum of input + output.
+        input_cost:    USD cost of input tokens.
+        output_cost:   USD cost of output tokens.
+        total_cost:    Combined USD cost.
+    """
 
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
 
-    # Cost tracking (in USD)
     input_cost: float = 0.0
     output_cost: float = 0.0
     total_cost: float = 0.0
 
     @property
     def cost_formatted(self) -> str:
-        """Return cost as formatted string."""
+        """Return the total cost as a human-readable USD string."""
         return f"${self.total_cost:.6f}"
 
 
 @dataclass
 class LLMResponse:
-    """Response from an LLM provider."""
+    """
+    Standardised response from any LLM provider.
+
+    The ``content`` field holds the generated text.  Usage statistics,
+    latency, and provider metadata are attached for tracking and debugging.
+
+    Attributes:
+        content:       Generated text.
+        model:         Model ID that produced the response.
+        provider:      Provider identifier.
+        usage:         Token counts and costs.
+        finish_reason: Why generation stopped (e.g. ``"stop"``, ``"length"``).
+        created_at:    Timestamp of creation.
+        latency_ms:    Wall-clock time for the API call (milliseconds).
+        raw_response:  Optional provider-specific metadata (never contains
+                       secrets -- only IDs, types, and stop reasons).
+    """
 
     content: str
     model: str
     provider: str
 
-    # Usage statistics
     usage: UsageStats = field(default_factory=UsageStats)
 
-    # Metadata
     finish_reason: str = "stop"
     created_at: datetime = field(default_factory=datetime.utcnow)
     latency_ms: float = 0.0
 
-    # Raw response for debugging
     raw_response: Optional[Dict[str, Any]] = None
 
     def __str__(self) -> str:
         return self.content
 
 
+# ---------------------------------------------------------------------------
+# Provider protocol (structural subtyping)
+# ---------------------------------------------------------------------------
+
+
 @runtime_checkable
 class LLMProvider(Protocol):
     """
-    Protocol for LLM providers.
+    Protocol that every LLM provider must satisfy.
 
-    All LLM providers (Anthropic, OpenAI, local models) must implement this interface.
-    This enables consistent usage across different backends while allowing
-    provider-specific optimizations.
+    Uses ``@runtime_checkable`` so callers can verify compliance with
+    ``isinstance(obj, LLMProvider)``.  Concrete classes do *not* need to
+    inherit from this protocol -- they just need matching signatures.
     """
 
     @property
     def provider_id(self) -> str:
-        """Unique identifier for this provider (e.g., 'anthropic', 'openai')."""
+        """Unique identifier (e.g. ``"anthropic"``, ``"openai"``)."""
         ...
 
     @property
     def model_id(self) -> str:
-        """Current model identifier (e.g., 'claude-3-5-sonnet-20241022')."""
+        """Current model identifier (e.g. ``"claude-sonnet-4-20250514"``)."""
         ...
 
     @property
     def display_name(self) -> str:
-        """Human-readable name for display (e.g., 'Claude 3.5 Sonnet')."""
+        """Human-readable name for display (e.g. ``"Claude Sonnet 4"``)."""
         ...
 
     @property
@@ -151,7 +248,7 @@ class LLMProvider(Protocol):
 
     @property
     def max_output_tokens(self) -> int:
-        """Maximum output tokens supported."""
+        """Maximum output tokens the model can generate."""
         ...
 
     def complete(
@@ -160,20 +257,20 @@ class LLMProvider(Protocol):
         config: Optional[LLMConfig] = None,
     ) -> LLMResponse:
         """
-        Generate a completion for the given prompt.
+        Generate a text completion.
 
         Args:
-            prompt: The user prompt/message
-            config: Optional configuration (uses defaults if not provided)
+            prompt: The user prompt/message.
+            config: Optional per-request configuration.
 
         Returns:
-            LLMResponse with the generated content and metadata
+            An ``LLMResponse`` with generated content and metadata.
 
         Raises:
-            ProviderError: For general provider errors
-            RateLimitError: When rate limited
-            AuthenticationError: When authentication fails
-            TokenLimitError: When token limit exceeded
+            ProviderError:        General provider failure.
+            RateLimitError:       Rate limit exceeded.
+            AuthenticationError:  Invalid API key.
+            TokenLimitError:      Prompt exceeds context window.
         """
         ...
 
@@ -184,52 +281,48 @@ class LLMProvider(Protocol):
         config: Optional[LLMConfig] = None,
     ) -> LLMResponse:
         """
-        Generate a completion with image context.
+        Generate a completion that includes image context.
 
         Args:
-            prompt: The user prompt/message
-            images: List of images as bytes (PNG/JPEG)
-            config: Optional configuration
-
-        Returns:
-            LLMResponse with the generated content
+            prompt: The user prompt/message.
+            images: List of images as raw bytes (PNG / JPEG).
+            config: Optional per-request configuration.
 
         Raises:
-            NotImplementedError: If provider doesn't support vision
-            ProviderError: For general provider errors
+            NotImplementedError: If the model lacks vision support.
         """
         ...
 
     def estimate_tokens(self, text: str) -> int:
         """
-        Estimate the number of tokens in the given text.
+        Approximate the number of tokens in *text*.
 
-        This is an approximation - actual tokenization may differ.
-
-        Args:
-            text: Text to estimate tokens for
-
-        Returns:
-            Estimated token count
+        This is a fast heuristic -- actual tokenisation may differ.
         """
         ...
 
     def get_cost_per_token(self) -> tuple[float, float]:
         """
-        Get the cost per token for this model.
-
-        Returns:
-            Tuple of (input_cost_per_million, output_cost_per_million) in USD
+        Return ``(input_cost_per_million, output_cost_per_million)`` in USD.
         """
         ...
 
 
+# ---------------------------------------------------------------------------
+# Abstract base class with shared plumbing
+# ---------------------------------------------------------------------------
+
+
 class BaseLLMProvider(ABC):
     """
-    Abstract base class for LLM providers.
+    Convenience base class for LLM provider implementations.
 
-    Provides common functionality and enforces the LLMProvider protocol.
-    Concrete implementations should inherit from this class.
+    Provides default implementations for token estimation, cost
+    calculation, and image rejection.  Concrete subclasses must
+    implement all ``@abstractmethod`` members.
+
+    Security:
+        ``__repr__`` masks the API key to prevent accidental exposure.
     """
 
     def __init__(
@@ -239,16 +332,24 @@ class BaseLLMProvider(ABC):
         **kwargs: Any,
     ):
         """
-        Initialize the provider.
-
         Args:
-            model_id: The model identifier to use
-            api_key: API key (if not provided, reads from environment)
-            **kwargs: Provider-specific options
+            model_id: The model identifier to use for API calls.
+            api_key:  API key (falls back to environment if ``None``).
+            **kwargs: Provider-specific options.
         """
         self._model_id = model_id
         self._api_key = api_key
         self._options = kwargs
+
+    def __repr__(self) -> str:
+        """Safe repr that never exposes the API key."""
+        masked = "****" if self._api_key else "None"
+        return (
+            f"{type(self).__name__}(model_id={self._model_id!r}, "
+            f"api_key={masked!r})"
+        )
+
+    # -- Abstract properties ------------------------------------------------
 
     @property
     @abstractmethod
@@ -285,14 +386,23 @@ class BaseLLMProvider(ABC):
         """Maximum output tokens."""
         ...
 
+    # -- Abstract methods ---------------------------------------------------
+
     @abstractmethod
     def complete(
         self,
         prompt: str,
         config: Optional[LLMConfig] = None,
     ) -> LLMResponse:
-        """Generate a completion."""
+        """Generate a text completion."""
         ...
+
+    @abstractmethod
+    def get_cost_per_token(self) -> tuple[float, float]:
+        """Return ``(input_cost/M, output_cost/M)`` in USD."""
+        ...
+
+    # -- Default implementations --------------------------------------------
 
     def complete_with_images(
         self,
@@ -300,30 +410,24 @@ class BaseLLMProvider(ABC):
         images: List[bytes],
         config: Optional[LLMConfig] = None,
     ) -> LLMResponse:
-        """Generate a completion with images."""
+        """Generate a completion with images (override in vision-capable providers)."""
         if not self.supports_vision:
             raise NotImplementedError(
-                f"Provider {self.provider_id} model {self.model_id} does not support vision"
+                f"Provider {self.provider_id} model {self.model_id} "
+                f"does not support vision"
             )
-        # Subclasses that support vision should override this
         raise NotImplementedError("Vision support not implemented")
 
     def estimate_tokens(self, text: str) -> int:
         """
-        Estimate tokens using a simple heuristic.
+        Rough token estimate using ~4 characters per token.
 
-        Override this method for provider-specific tokenization.
+        Override for provider-specific tokenisation.
         """
-        # Rough estimate: ~4 characters per token for English text
         return len(text) // 4
 
-    @abstractmethod
-    def get_cost_per_token(self) -> tuple[float, float]:
-        """Get cost per million tokens (input, output)."""
-        ...
-
     def _calculate_cost(self, usage: UsageStats) -> UsageStats:
-        """Calculate cost based on usage and pricing."""
+        """Populate cost fields on *usage* using this model's pricing."""
         input_price, output_price = self.get_cost_per_token()
         usage.input_cost = (usage.input_tokens / 1_000_000) * input_price
         usage.output_cost = (usage.output_tokens / 1_000_000) * output_price
@@ -331,5 +435,5 @@ class BaseLLMProvider(ABC):
         return usage
 
     def _get_default_config(self) -> LLMConfig:
-        """Return default configuration."""
+        """Return a fresh default ``LLMConfig``."""
         return LLMConfig()

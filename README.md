@@ -2,18 +2,41 @@
 
 Shared LLM abstraction layer for chess coaching applications.
 
+This library provides a provider-agnostic interface for working with large language models, purpose-built for chess coaching use cases.  It is the shared foundation for all Kaspar chess products.
+
 ## Products Using This Library
 
-- [YourChessDotComCoach](https://github.com/vds4321/YourChessDotComCoach) - Adult chess coaching (live at yourchessdotcomcoach.fly.dev)
 - [KasparChess](https://github.com/vds4321/KasparChess) - Parent-focused coaching for children (live at [kasparchess.com](https://kasparchess.com))
+- [YourChessDotComCoach](https://github.com/vds4321/YourChessDotComCoach) - Adult chess coaching (live at yourchessdotcomcoach.fly.dev)
 
 ## Features
 
-- **Protocol-based LLM Provider Abstraction**: Flexible interface supporting multiple LLM providers
-- **Model Tier System**: CHEAP/STANDARD/PREMIUM tiers for cost optimization
-- **Versioned Prompt Templates**: Reusable prompts for coaching, scouting, and extraction
-- **Cost and Usage Tracking**: Monitor LLM usage and costs across requests
-- **Provider Registry**: Easy switching between providers (Anthropic, OpenAI, local models)
+- **Protocol-based LLM provider abstraction** - flexible interface supporting multiple backends via PEP 544 structural subtyping
+- **Model tier system** - CHEAP / STANDARD / PREMIUM tiers for automatic cost-quality routing
+- **Versioned prompt templates** - reusable, testable prompts for coaching, scouting, and data extraction
+- **Cost and usage tracking** - per-request and aggregate USD cost monitoring with budget limits
+- **Provider registry** - factory-based provider management with lazy dependency loading
+- **Security by default** - API keys are never logged, serialised, or exposed in `__repr__` output
+
+## Architecture
+
+```
+chess_llm/
+├── config/         # Model tiers, pricing, environment settings
+│   ├── models.py   # ModelTier enum, ModelConfig, model registries
+│   └── settings.py # ProviderSettings, Settings, env var loading
+├── providers/      # LLM provider implementations
+│   ├── base.py     # LLMProvider protocol, BaseLLMProvider ABC, response types
+│   ├── anthropic.py# Anthropic Claude implementation (production-ready)
+│   └── registry.py # Factory-based provider registration and lookup
+├── prompts/        # Versioned prompt templates
+│   ├── base.py     # PromptTemplate ABC, PromptVersion, output parsing
+│   ├── coaching/   # MentorInsightsPrompt, OpeningAnalysisPrompt
+│   ├── extraction/ # KeyAreasExtractionPrompt (JSON output)
+│   └── scouting/   # BattlePlanPrompt (opponent analysis)
+└── tracking/       # Usage and cost tracking
+    └── usage.py    # UsageTracker, UsageRecord, budget enforcement
+```
 
 ## Installation
 
@@ -27,8 +50,8 @@ pip install "git+https://github.com/vds4321/chess-llm-core.git#egg=chess-llm-cor
 # With all providers
 pip install "git+https://github.com/vds4321/chess-llm-core.git#egg=chess-llm-core[all]"
 
-# Development
-pip install "git+https://github.com/vds4321/chess-llm-core.git#egg=chess-llm-core[dev]"
+# Development (includes test and lint tools)
+pip install -e ".[dev]"
 ```
 
 ## Quick Start
@@ -54,30 +77,37 @@ print(response.content)
 
 ## Model Tiers
 
-| Tier | Use Case | Anthropic Model |
-|------|----------|-----------------|
-| CHEAP | Extraction, classification | Claude 3.5 Haiku |
-| STANDARD | Coaching insights, scouting | Claude Sonnet 4 |
-| PREMIUM | Comprehensive reports | Claude 3 Opus |
+| Tier       | Use Case                    | Anthropic Model    | Cost (input/output per 1M tokens) |
+|------------|-----------------------------|--------------------|-----------------------------------|
+| `CHEAP`    | Extraction, classification  | Claude 3.5 Haiku   | $1.00 / $5.00                     |
+| `STANDARD` | Coaching, scouting, analysis| Claude Sonnet 4    | $3.00 / $15.00                    |
+| `PREMIUM`  | Comprehensive reports       | Claude 3 Opus      | $15.00 / $75.00                   |
 
 ## Prompt Templates
 
 ### Coaching
-- `MentorInsightsPrompt`: Personalized coaching insights based on game analysis
+- **`MentorInsightsPrompt`** - Personalised coaching report based on 6 months of game analysis.  Produces markdown with consistent section headers.
+- **`OpeningAnalysisPrompt`** - Targeted advice for a specific opening (150-200 words).
 
 ### Scouting
-- `BattlePlanPrompt`: Battle plan for beating a specific opponent
+- **`BattlePlanPrompt`** - Structured JSON battle plan for beating a specific opponent, with concrete opening recommendations.
 
 ### Extraction
-- `KeyAreasExtractionPrompt`: Extract key improvement areas from reports
+- **`KeyAreasExtractionPrompt`** - Extracts structured JSON from free-text coaching reports for progress tracking.
 
 ## Configuration
 
-Environment variables:
-- `ANTHROPIC_API_KEY`: Anthropic API key
-- `OPENAI_API_KEY`: OpenAI API key (for future use)
-- `CHESS_LLM_DEFAULT_PROVIDER`: Default provider (default: "anthropic")
-- `CHESS_LLM_DEFAULT_TIER`: Default tier (default: "standard")
+Set these environment variables to configure the library:
+
+| Variable                     | Description                      | Default      |
+|------------------------------|----------------------------------|--------------|
+| `ANTHROPIC_API_KEY`          | Anthropic API key                | *required*   |
+| `OPENAI_API_KEY`             | OpenAI API key (future use)      | —            |
+| `CHESS_LLM_DEFAULT_PROVIDER` | Default provider                 | `anthropic`  |
+| `CHESS_LLM_DEFAULT_TIER`     | Default tier                     | `standard`   |
+| `CHESS_LLM_TRACK_COSTS`      | Enable cost tracking             | `true`       |
+
+See [`chess_llm/config/settings.py`](chess_llm/config/settings.py) for the full list.
 
 ## Usage Tracking
 
@@ -91,6 +121,15 @@ print(f"Total cost: ${tracker.total_cost:.4f}")
 print(f"Total tokens: {tracker.total_tokens}")
 print(tracker.get_summary())
 ```
+
+## Security
+
+API keys are loaded from environment variables and **never**:
+- Included in `__repr__` output or log messages
+- Stored in plain text in configuration files
+- Exposed in error messages or tracebacks
+
+See [SECURITY.md](SECURITY.md) for the full security policy.
 
 ## Development
 
@@ -106,6 +145,14 @@ ruff check .
 black --check .
 mypy chess_llm/
 ```
+
+## Related Repositories
+
+| Repository | Purpose |
+|------------|---------|
+| [KasparChess](https://github.com/vds4321/KasparChess) | Parent-focused chess coaching web application |
+| [YourChessDotComCoach](https://github.com/vds4321/YourChessDotComCoach) | Adult chess coaching web application |
+| `kaspar_eval` | Prompt evaluation, guardrails testing, and LLM comparison (planned) |
 
 ## License
 

@@ -1,33 +1,30 @@
 """
 Versioned prompt templates for chess coaching.
 
-Prompts are organized by category:
-- coaching: Mentor insights, improvement plans, tactical advice
-- scouting: Battle plans, opponent analysis
-- extraction: Key area extraction, data parsing
+Prompts are organised by domain:
 
-Each prompt template includes:
-- Version tracking for A/B testing
-- Recommended model tier
-- Token budget estimates
-- Structured output formats
+    - **coaching** -- Mentor insights, opening analysis, improvement plans.
+    - **scouting** -- Battle plans and opponent analysis.
+    - **extraction** -- Structured data extraction from free-text reports.
 
-Usage:
-    from chess_llm.prompts import MentorInsightsPrompt, ModelTier
+Each template includes:
+    - Semantic version tracking (for A/B testing via ``kaspar_eval``).
+    - Recommended model tier and token budget.
+    - Output format declaration.
+    - Optional response-parsing logic.
 
-    # Create a prompt
+Usage::
+
+    from chess_llm.prompts import MentorInsightsPrompt
+
     prompt = MentorInsightsPrompt(
         username="player123",
         stats=player_stats,
         progression=progression_data,
     )
 
-    # Get the rendered prompt
     text = prompt.render()
-
-    # Get recommended configuration
-    tier = prompt.recommended_tier  # ModelTier.STANDARD
-    max_tokens = prompt.estimated_output_tokens  # ~1500
+    tier = prompt.recommended_tier
 """
 
 from chess_llm.prompts.base import PromptTemplate, PromptVersion

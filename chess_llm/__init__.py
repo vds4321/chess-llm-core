@@ -1,23 +1,34 @@
 """
-Chess LLM Core - Shared LLM abstraction layer for chess coaching applications.
+chess-llm-core -- Shared LLM abstraction layer for chess coaching applications.
 
-This package provides:
-- Protocol-based LLM provider abstraction
-- Multiple provider implementations (Anthropic, OpenAI, local models)
-- Versioned prompt templates for chess coaching
-- Model tier configuration (cheap/standard/premium)
-- Cost and usage tracking
+This package provides a provider-agnostic interface for working with large
+language models in the context of chess coaching.  It is the shared
+foundation used by `KasparChess <https://kasparchess.com>`_ and
+`YourChessDotComCoach <https://yourchessdotcomcoach.fly.dev>`_.
 
-Usage:
+Key capabilities:
+    - **Provider abstraction** -- protocol-based interface supporting
+      Anthropic, OpenAI (stub), and local models (stub).
+    - **Model tier system** -- CHEAP / STANDARD / PREMIUM tiers for
+      automatic cost-quality routing.
+    - **Versioned prompt templates** -- reusable, testable prompts for
+      coaching, scouting, and data extraction.
+    - **Cost & usage tracking** -- per-request and aggregate cost
+      monitoring with budget limits.
+
+Quick start::
+
     from chess_llm import get_provider, ModelTier
     from chess_llm.prompts import MentorInsightsPrompt
 
-    # Get a provider for a specific tier
-    provider = get_provider(ModelTier.STANDARD)
-
-    # Use a prompt template
+    provider = get_provider("anthropic", tier=ModelTier.STANDARD)
     prompt = MentorInsightsPrompt(username="player", stats=stats)
     response = provider.complete(prompt.render())
+
+Security:
+    API keys are loaded from environment variables and never exposed in
+    ``__repr__`` output or log messages.  See ``SECURITY.md`` for the
+    full security policy.
 """
 
 from chess_llm.providers.base import (

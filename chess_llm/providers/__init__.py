@@ -1,10 +1,15 @@
 """
-LLM Provider implementations.
+LLM provider sub-package.
 
 Available providers:
-- AnthropicProvider: Claude models (Haiku, Sonnet, Opus)
-- OpenAIProvider: GPT models (stub for future)
-- LocalProvider: Ollama/local models (stub for future)
+    - **AnthropicProvider** -- Claude models (Haiku, Sonnet 4, Opus).
+      Fully implemented.
+    - **OpenAI** -- GPT models.  Registered but not yet implemented.
+    - **Local** -- Ollama / local models.  Registered but not yet
+      implemented.
+
+Use ``get_provider()`` from the registry rather than importing concrete
+classes directly -- this keeps consuming code provider-agnostic.
 """
 
 from chess_llm.providers.base import (

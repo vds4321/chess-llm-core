@@ -1,24 +1,58 @@
 """
-Base prompt template classes.
+Base prompt template framework.
 
-Provides:
-- PromptTemplate: Base class for all prompt templates
-- PromptVersion: Version tracking for prompts
-- Output parsing utilities
+All prompt templates in the library inherit from ``PromptTemplate``.
+This module provides:
+
+    - ``PromptVersion`` -- semantic versioning for A/B testing and auditing
+    - ``OutputFormat``  -- enum declaring the expected LLM response format
+    - ``PromptTemplate`` -- abstract base with rendering, validation, and
+      response parsing hooks
+
+Design rationale:
+    Prompt templates encode domain knowledge (chess coaching) and decouple
+    *what* we ask the LLM from *how* we communicate with it.  Each
+    template declares its recommended model tier and token budget so the
+    calling code can select the right provider automatically.
+
+Creating a new prompt:
+    1. Subclass ``PromptTemplate`` as a ``@dataclass``.
+    2. Override class-level attributes (``prompt_id``, ``version``, etc.).
+    3. Implement ``render()`` returning the full prompt text.
+    4. Optionally override ``render_system_prompt()``, ``validate()``,
+       and ``parse_response()``.
+    5. Re-export from the appropriate ``__init__.py``.
+
+Maintenance:
+    When changing a prompt's text, bump its ``PromptVersion``.  This
+    enables downstream analytics in ``kaspar_eval`` to distinguish
+    results produced by different prompt revisions.
 """
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional
 
 from chess_llm.config.models import ModelTier
 
 
+# ---------------------------------------------------------------------------
+# Versioning
+# ---------------------------------------------------------------------------
+
+
 @dataclass
 class PromptVersion:
-    """Version information for a prompt template."""
+    """
+    Semantic version for a prompt template.
+
+    Follows ``major.minor.patch`` convention:
+        - *major*: Breaking changes to output format or required fields.
+        - *minor*: Meaningful prompt text changes that may affect quality.
+        - *patch*: Cosmetic fixes (typos, formatting) with no quality impact.
+    """
 
     major: int = 1
     minor: int = 0
@@ -28,48 +62,60 @@ class PromptVersion:
 
     @property
     def version_string(self) -> str:
-        """Return version as string (e.g., '1.2.3')."""
+        """Return version as ``"major.minor.patch"``."""
         return f"{self.major}.{self.minor}.{self.patch}"
 
     def __str__(self) -> str:
         return self.version_string
 
 
-class OutputFormat(Enum):
-    """Expected output format from the LLM."""
+# ---------------------------------------------------------------------------
+# Output format enum
+# ---------------------------------------------------------------------------
 
-    TEXT = "text"  # Free-form text
-    MARKDOWN = "markdown"  # Markdown formatted text
-    JSON = "json"  # JSON object
-    JSON_ARRAY = "json_array"  # JSON array
-    STRUCTURED = "structured"  # Custom structured format
+
+class OutputFormat(Enum):
+    """Declares what the LLM is expected to return."""
+
+    TEXT = "text"
+    MARKDOWN = "markdown"
+    JSON = "json"
+    JSON_ARRAY = "json_array"
+    STRUCTURED = "structured"
+
+
+# ---------------------------------------------------------------------------
+# Abstract base template
+# ---------------------------------------------------------------------------
 
 
 @dataclass
 class PromptTemplate(ABC):
     """
-    Base class for prompt templates.
+    Abstract base for all prompt templates.
 
-    Subclasses define specific prompts with:
-    - Template text with placeholders
-    - Required and optional parameters
-    - Recommended model tier and token limits
-    - Output format expectations
+    Subclasses define:
+        - Template text with data placeholders
+        - Required and optional input parameters
+        - Recommended model tier and token budget
+        - Output format expectation
+        - Optional response-parsing logic
 
-    Example:
+    Example::
+
+        @dataclass
         class MyPrompt(PromptTemplate):
             prompt_id = "my_prompt"
             version = PromptVersion(1, 0, 0)
             recommended_tier = ModelTier.STANDARD
 
-            def __init__(self, name: str):
-                self.name = name
+            name: str = ""
 
             def render(self) -> str:
                 return f"Hello, {self.name}!"
     """
 
-    # Class-level attributes (override in subclasses)
+    # -- Override these in subclasses ---------------------------------------
     prompt_id: str = "base"
     version: PromptVersion = PromptVersion(1, 0, 0)
     recommended_tier: ModelTier = ModelTier.STANDARD
@@ -77,33 +123,35 @@ class PromptTemplate(ABC):
     estimated_input_tokens: int = 500
     estimated_output_tokens: int = 1000
 
+    # -----------------------------------------------------------------------
+    # Core interface
+    # -----------------------------------------------------------------------
+
     @abstractmethod
     def render(self) -> str:
         """
-        Render the prompt template with current parameters.
+        Render the complete prompt text, ready to send to the LLM.
 
         Returns:
-            The complete prompt text ready for the LLM
+            The fully-interpolated prompt string.
         """
         ...
 
     def render_system_prompt(self) -> Optional[str]:
         """
-        Render the system prompt if applicable.
-
-        Override this method to provide a system prompt.
+        Optional system prompt that sets the LLM's persona / context.
 
         Returns:
-            System prompt text, or None if not needed
+            System prompt text, or ``None`` to omit.
         """
         return None
 
     def get_metadata(self) -> Dict[str, Any]:
         """
-        Get metadata about this prompt.
+        Return a serialisable dict describing this prompt template.
 
-        Returns:
-            Dict with prompt ID, version, tier, etc.
+        Useful for logging, analytics, and linking results back to the
+        exact prompt version that produced them.
         """
         return {
             "prompt_id": self.prompt_id,
@@ -116,63 +164,78 @@ class PromptTemplate(ABC):
 
     def validate(self) -> List[str]:
         """
-        Validate the prompt parameters.
-
-        Override to add custom validation.
+        Validate prompt parameters before rendering.
 
         Returns:
-            List of validation error messages (empty if valid)
+            A list of human-readable error messages.  Empty means valid.
         """
         return []
 
     def parse_response(self, response: str) -> Any:
         """
-        Parse the LLM response into structured data.
+        Parse the raw LLM response into structured data.
 
-        Default implementation returns raw text. Override for structured outputs.
+        The default implementation handles JSON extraction from markdown
+        code blocks.  Override for custom formats.
 
         Args:
-            response: Raw LLM response text
+            response: Raw text returned by the LLM.
 
         Returns:
-            Parsed response (varies by output_format)
+            Parsed data (dict, list, or raw string depending on format).
         """
-        if self.output_format == OutputFormat.JSON:
-            import json
-            # Try to extract JSON from response
-            text = response.strip()
-            # Handle markdown code blocks
-            if text.startswith("```"):
-                lines = text.split("\n")
-                text = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
-            if text.startswith("json"):
-                text = text[4:].strip()
-            return json.loads(text)
-
-        elif self.output_format == OutputFormat.JSON_ARRAY:
-            import json
-            text = response.strip()
-            if text.startswith("```"):
-                lines = text.split("\n")
-                text = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
-            return json.loads(text)
-
-        else:
-            return response
+        if self.output_format in (OutputFormat.JSON, OutputFormat.JSON_ARRAY):
+            return _extract_json(response)
+        return response
 
 
-def create_prompt_from_template(
-    template: str,
-    **kwargs: Any,
-) -> str:
+# ---------------------------------------------------------------------------
+# Shared utilities
+# ---------------------------------------------------------------------------
+
+
+def _extract_json(text: str) -> Any:
     """
-    Simple template rendering using Python format strings.
+    Extract and parse JSON from an LLM response.
+
+    Handles common patterns:
+        - Raw JSON
+        - JSON wrapped in markdown ````` fences
+        - ``json`` language tag after the opening fence
+    """
+    import json
+
+    text = text.strip()
+
+    # Strip markdown code fences
+    if text.startswith("```"):
+        lines = text.split("\n")
+        # Remove opening fence (possibly with language tag)
+        lines = lines[1:]
+        # Remove closing fence
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines)
+
+    # Remove stray "json" prefix
+    if text.startswith("json"):
+        text = text[4:].strip()
+
+    return json.loads(text)
+
+
+def create_prompt_from_template(template: str, **kwargs: Any) -> str:
+    """
+    Render a simple Python format-string template.
+
+    This is a lightweight alternative for ad-hoc prompts that don't need
+    the full ``PromptTemplate`` machinery.
 
     Args:
-        template: Template string with {placeholder} markers
-        **kwargs: Values to substitute
+        template: Format string with ``{placeholder}`` markers.
+        **kwargs: Values to substitute.
 
     Returns:
-        Rendered template string
+        The rendered string.
     """
     return template.format(**kwargs)
