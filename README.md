@@ -1,5 +1,7 @@
 # chess-llm-core
 
+[![KasparChess](https://img.shields.io/badge/KasparChess-Live-blue)](https://kasparchess.com)
+
 Shared LLM abstraction layer for chess coaching applications.
 
 This library provides a provider-agnostic interface for working with large language models, purpose-built for chess coaching use cases.  It is the shared foundation for all Kaspar chess products.
