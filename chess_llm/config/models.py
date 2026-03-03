@@ -22,7 +22,7 @@ Usage::
     config = get_model_config(ModelTier.STANDARD)
     print(f"Using {config.display_name} at ${config.input_cost_per_million}/M tokens")
 
-    config = get_model_config("claude-3-5-haiku-20241022")
+    config = get_model_config("claude-haiku-4-5-20251001")
 
 Maintenance:
     To add a new model, create a ``ModelConfig`` entry in the appropriate
@@ -148,19 +148,19 @@ class ModelConfig:
 # ==========================================================================
 
 ANTHROPIC_MODELS: Dict[str, ModelConfig] = {
-    "claude-3-5-haiku-20241022": ModelConfig(
-        model_id="claude-3-5-haiku-20241022",
+    "claude-haiku-4-5-20251001": ModelConfig(
+        model_id="claude-haiku-4-5-20251001",
         provider="anthropic",
-        display_name="Claude 3.5 Haiku",
+        display_name="Claude Haiku 4.5",
         tier=ModelTier.CHEAP,
         max_context_tokens=200_000,
-        max_output_tokens=8_192,
+        max_output_tokens=64_000,
         supports_vision=True,
         supports_function_calling=True,
         input_cost_per_million=1.00,
         output_cost_per_million=5.00,
         avg_latency_ms=500,
-        quality_score=0.75,
+        quality_score=0.80,
         recommended_for=[
             "key_area_extraction",
             "simple_classification",
@@ -168,19 +168,19 @@ ANTHROPIC_MODELS: Dict[str, ModelConfig] = {
             "data_formatting",
         ],
     ),
-    "claude-sonnet-4-20250514": ModelConfig(
-        model_id="claude-sonnet-4-20250514",
+    "claude-sonnet-4-6": ModelConfig(
+        model_id="claude-sonnet-4-6",
         provider="anthropic",
-        display_name="Claude Sonnet 4",
+        display_name="Claude Sonnet 4.6",
         tier=ModelTier.STANDARD,
         max_context_tokens=200_000,
-        max_output_tokens=16_000,
+        max_output_tokens=64_000,
         supports_vision=True,
         supports_function_calling=True,
         input_cost_per_million=3.00,
         output_cost_per_million=15.00,
         avg_latency_ms=1500,
-        quality_score=0.90,
+        quality_score=0.92,
         recommended_for=[
             "coaching_insights",
             "opening_analysis",
@@ -189,20 +189,19 @@ ANTHROPIC_MODELS: Dict[str, ModelConfig] = {
             "scouting_reports",
         ],
     ),
-    # Claude 3 Opus -- highest quality (legacy, kept for reference/fallback)
-    "claude-3-opus-20240229": ModelConfig(
-        model_id="claude-3-opus-20240229",
+    "claude-opus-4-6": ModelConfig(
+        model_id="claude-opus-4-6",
         provider="anthropic",
-        display_name="Claude 3 Opus",
+        display_name="Claude Opus 4.6",
         tier=ModelTier.PREMIUM,
         max_context_tokens=200_000,
-        max_output_tokens=4_096,
+        max_output_tokens=128_000,
         supports_vision=True,
         supports_function_calling=True,
-        input_cost_per_million=15.00,
-        output_cost_per_million=75.00,
+        input_cost_per_million=5.00,
+        output_cost_per_million=25.00,
         avg_latency_ms=3000,
-        quality_score=0.95,
+        quality_score=0.97,
         recommended_for=[
             "comprehensive_reports",
             "complex_strategic_analysis",
@@ -284,9 +283,9 @@ ALL_MODELS: Dict[str, ModelConfig] = {
 # Default model ID for each (provider, tier) combination.
 DEFAULT_MODELS: Dict[str, Dict[ModelTier, str]] = {
     "anthropic": {
-        ModelTier.CHEAP: "claude-3-5-haiku-20241022",
-        ModelTier.STANDARD: "claude-sonnet-4-20250514",
-        ModelTier.PREMIUM: "claude-3-opus-20240229",
+        ModelTier.CHEAP: "claude-haiku-4-5-20251001",
+        ModelTier.STANDARD: "claude-sonnet-4-6",
+        ModelTier.PREMIUM: "claude-opus-4-6",
     },
     "openai": {
         ModelTier.CHEAP: "gpt-4o-mini",

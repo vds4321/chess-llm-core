@@ -53,7 +53,7 @@ class TestModelConfig:
     def test_anthropic_models_exist(self):
         """Test that Anthropic models are configured."""
         assert len(ANTHROPIC_MODELS) > 0
-        assert "claude-3-5-haiku-20241022" in ANTHROPIC_MODELS
+        assert "claude-haiku-4-5-20251001" in ANTHROPIC_MODELS
 
 
 class TestGetModelConfig:
@@ -61,7 +61,7 @@ class TestGetModelConfig:
 
     def test_get_known_model(self):
         """Test getting config for a known model."""
-        config = get_model_config("claude-3-5-haiku-20241022")
+        config = get_model_config("claude-haiku-4-5-20251001")
         assert config is not None
         assert config.tier == ModelTier.CHEAP
 
