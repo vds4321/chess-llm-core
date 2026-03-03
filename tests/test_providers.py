@@ -32,7 +32,7 @@ class TestLLMConfig:
         config = LLMConfig()
         assert config.max_tokens == 1024  # Default is 1024
         assert config.temperature == 0.7
-        assert config.top_p == 1.0
+        assert config.top_p is None
 
     def test_custom_config(self):
         """Test custom config values."""

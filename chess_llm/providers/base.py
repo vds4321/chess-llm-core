@@ -131,7 +131,7 @@ class LLMConfig:
 
     max_tokens: int = 1024
     temperature: float = 0.7
-    top_p: float = 1.0
+    top_p: Optional[float] = None
     stop_sequences: List[str] = field(default_factory=list)
     system_prompt: Optional[str] = None
 

@@ -427,13 +427,16 @@ class AnthropicProvider(BaseLLMProvider):
             "model": self._model_id,
             "max_tokens": min(config.max_tokens, self.max_output_tokens),
             "messages": messages,
-            "temperature": config.temperature,
         }
+
+        # Anthropic API does not allow both temperature and top_p
+        if config.top_p is not None:
+            kwargs["top_p"] = config.top_p
+        else:
+            kwargs["temperature"] = config.temperature
 
         if config.system_prompt:
             kwargs["system"] = config.system_prompt
-        if config.top_p is not None:
-            kwargs["top_p"] = config.top_p
         if config.stop_sequences:
             kwargs["stop_sequences"] = config.stop_sequences
 
