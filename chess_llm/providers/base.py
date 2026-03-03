@@ -32,6 +32,7 @@ Security:
     accidental ``print()`` or logging calls never expose secrets.
 """
 
+import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -274,6 +275,23 @@ class LLMProvider(Protocol):
         """
         ...
 
+    def complete_messages(
+        self,
+        messages: List[Dict[str, Any]],
+        config: Optional[LLMConfig] = None,
+    ) -> LLMResponse:
+        """
+        Generate a completion from a messages list.
+
+        Args:
+            messages: List of message dicts with ``role`` and ``content`` keys.
+            config:   Optional per-request configuration.
+
+        Returns:
+            An ``LLMResponse`` with generated content and metadata.
+        """
+        ...
+
     def complete_with_images(
         self,
         prompt: str,
@@ -304,6 +322,26 @@ class LLMProvider(Protocol):
     def get_cost_per_token(self) -> tuple[float, float]:
         """
         Return ``(input_cost_per_million, output_cost_per_million)`` in USD.
+        """
+        ...
+
+    async def acomplete(
+        self,
+        prompt: str,
+        config: Optional[LLMConfig] = None,
+    ) -> LLMResponse:
+        """
+        Async version of ``complete()``.
+        """
+        ...
+
+    async def acomplete_messages(
+        self,
+        messages: List[Dict[str, Any]],
+        config: Optional[LLMConfig] = None,
+    ) -> LLMResponse:
+        """
+        Async version of ``complete_messages()``.
         """
         ...
 
@@ -404,6 +442,32 @@ class BaseLLMProvider(ABC):
 
     # -- Default implementations --------------------------------------------
 
+    def complete_messages(
+        self,
+        messages: List[Dict[str, Any]],
+        config: Optional[LLMConfig] = None,
+    ) -> LLMResponse:
+        """
+        Generate a completion from a messages list.
+
+        Default implementation extracts the last user message and delegates
+        to ``complete()``.  Override in subclasses for native multi-turn
+        support.
+
+        Args:
+            messages: List of message dicts with ``role`` and ``content``.
+            config:   Per-request configuration.
+        """
+        # Extract the last user message as the prompt
+        prompt = ""
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                prompt = msg.get("content", "")
+                break
+        if not prompt and messages:
+            prompt = messages[-1].get("content", "")
+        return self.complete(prompt, config)
+
     def complete_with_images(
         self,
         prompt: str,
@@ -425,6 +489,37 @@ class BaseLLMProvider(ABC):
         Override for provider-specific tokenisation.
         """
         return len(text) // 4
+
+    # -- Async methods (default: thread-pool delegation) --------------------
+
+    async def acomplete(
+        self,
+        prompt: str,
+        config: Optional[LLMConfig] = None,
+    ) -> LLMResponse:
+        """
+        Async version of ``complete()``.
+
+        Default implementation delegates to the sync ``complete()`` in a
+        thread pool.  Override in subclasses that have native async SDK
+        support (e.g. ``AsyncAnthropic``, ``AsyncOpenAI``).
+        """
+        return await asyncio.to_thread(self.complete, prompt, config)
+
+    async def acomplete_messages(
+        self,
+        messages: List[Dict[str, Any]],
+        config: Optional[LLMConfig] = None,
+    ) -> LLMResponse:
+        """
+        Async version of ``complete_messages()``.
+
+        Default implementation delegates to sync ``complete_messages()`` in
+        a thread pool.  Override for native async support.
+        """
+        return await asyncio.to_thread(self.complete_messages, messages, config)
+
+    # -- Cost / config helpers ----------------------------------------------
 
     def _calculate_cost(self, usage: UsageStats) -> UsageStats:
         """Populate cost fields on *usage* using this model's pricing."""

@@ -33,28 +33,34 @@ Security:
 
 from chess_llm.providers.base import (
     LLMProvider,
+    BaseLLMProvider,
     LLMResponse,
     LLMConfig,
+    UsageStats,
     ProviderError,
     RateLimitError,
     AuthenticationError,
+    TokenLimitError,
 )
 from chess_llm.config.models import ModelTier, ModelConfig, get_model_config
 from chess_llm.config.settings import Settings, get_settings
 from chess_llm.providers.registry import get_provider, register_provider, list_providers
 from chess_llm.tracking.usage import UsageTracker, get_tracker, reset_tracker
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     # Core types
     "LLMProvider",
+    "BaseLLMProvider",
     "LLMResponse",
     "LLMConfig",
+    "UsageStats",
     # Errors
     "ProviderError",
     "RateLimitError",
     "AuthenticationError",
+    "TokenLimitError",
     # Configuration
     "ModelTier",
     "ModelConfig",

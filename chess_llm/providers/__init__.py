@@ -14,11 +14,14 @@ classes directly -- this keeps consuming code provider-agnostic.
 
 from chess_llm.providers.base import (
     LLMProvider,
+    BaseLLMProvider,
     LLMResponse,
     LLMConfig,
+    UsageStats,
     ProviderError,
     RateLimitError,
     AuthenticationError,
+    TokenLimitError,
 )
 from chess_llm.providers.registry import (
     get_provider,
@@ -29,11 +32,14 @@ from chess_llm.providers.registry import (
 
 __all__ = [
     "LLMProvider",
+    "BaseLLMProvider",
     "LLMResponse",
     "LLMConfig",
+    "UsageStats",
     "ProviderError",
     "RateLimitError",
     "AuthenticationError",
+    "TokenLimitError",
     "get_provider",
     "register_provider",
     "list_providers",

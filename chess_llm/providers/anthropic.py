@@ -158,6 +158,8 @@ class AnthropicProvider(BaseLLMProvider):
             import anthropic
 
             self._client = anthropic.Anthropic(api_key=api_key, **kwargs)
+            self._async_client = None  # Lazy-init on first async call
+            self._client_kwargs = kwargs  # Save for async client creation
         except ImportError:
             raise ImportError(
                 "anthropic package not installed. "
@@ -288,6 +290,109 @@ class AnthropicProvider(BaseLLMProvider):
             )
 
             response = self._client.messages.create(**request_kwargs)
+            latency_ms = (time.time() - start_time) * 1000
+
+            return self._build_response(response, latency_ms)
+
+        except Exception as e:
+            self._handle_error(e)
+
+    # -----------------------------------------------------------------------
+    # Messages-list completion (sync)
+    # -----------------------------------------------------------------------
+
+    def complete_messages(
+        self,
+        messages: List[Dict[str, Any]],
+        config: Optional[LLMConfig] = None,
+    ) -> LLMResponse:
+        """
+        Generate a completion from a messages list (multi-turn).
+
+        Args:
+            messages: List of message dicts with ``role`` and ``content``.
+            config:   Per-request configuration.
+        """
+        config = config or self._get_default_config()
+        start_time = time.time()
+
+        try:
+            request_kwargs = self._build_request_kwargs(
+                messages=messages,
+                config=config,
+            )
+
+            response = self._client.messages.create(**request_kwargs)
+            latency_ms = (time.time() - start_time) * 1000
+
+            return self._build_response(response, latency_ms)
+
+        except Exception as e:
+            self._handle_error(e)
+
+    # -----------------------------------------------------------------------
+    # Async completions (native AsyncAnthropic)
+    # -----------------------------------------------------------------------
+
+    def _get_async_client(self):
+        """Lazily initialise the async Anthropic client."""
+        if self._async_client is None:
+            import anthropic
+
+            self._async_client = anthropic.AsyncAnthropic(
+                api_key=self._api_key, **self._client_kwargs
+            )
+        return self._async_client
+
+    async def acomplete(
+        self,
+        prompt: str,
+        config: Optional[LLMConfig] = None,
+    ) -> LLMResponse:
+        """
+        Async text completion using ``AsyncAnthropic``.
+
+        Native async -- no thread pool needed.
+        """
+        config = config or self._get_default_config()
+        start_time = time.time()
+
+        try:
+            request_kwargs = self._build_request_kwargs(
+                messages=[{"role": "user", "content": prompt}],
+                config=config,
+            )
+
+            client = self._get_async_client()
+            response = await client.messages.create(**request_kwargs)
+            latency_ms = (time.time() - start_time) * 1000
+
+            return self._build_response(response, latency_ms)
+
+        except Exception as e:
+            self._handle_error(e)
+
+    async def acomplete_messages(
+        self,
+        messages: List[Dict[str, Any]],
+        config: Optional[LLMConfig] = None,
+    ) -> LLMResponse:
+        """
+        Async messages-list completion using ``AsyncAnthropic``.
+
+        Native async -- no thread pool needed.
+        """
+        config = config or self._get_default_config()
+        start_time = time.time()
+
+        try:
+            request_kwargs = self._build_request_kwargs(
+                messages=messages,
+                config=config,
+            )
+
+            client = self._get_async_client()
+            response = await client.messages.create(**request_kwargs)
             latency_ms = (time.time() - start_time) * 1000
 
             return self._build_response(response, latency_ms)

@@ -198,13 +198,12 @@ def _register_anthropic() -> None:
 
 
 def _register_openai() -> None:
-    """Register the OpenAI provider factory (stub -- not yet implemented)."""
+    """Register the OpenAI provider factory."""
 
     def factory(**kwargs: Any) -> LLMProvider:
-        raise NotImplementedError(
-            "OpenAI provider not yet implemented. "
-            "Coming soon! Use 'anthropic' provider for now."
-        )
+        from chess_llm.providers.openai import OpenAIProvider
+
+        return OpenAIProvider(**kwargs)
 
     register_provider("openai", factory)
 
