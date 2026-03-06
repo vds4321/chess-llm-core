@@ -4,9 +4,9 @@ Anthropic (Claude) LLM provider implementation.
 This is the primary production provider for all chess coaching applications.
 It supports the full Claude model family:
 
-    - Claude 3.5 Haiku  -- fast and cheap (CHEAP tier)
-    - Claude Sonnet 4   -- balanced performance (STANDARD tier)
-    - Claude 3 Opus     -- highest quality (PREMIUM tier, legacy)
+    - Claude Haiku 4.5  -- fast and cheap (CHEAP tier)
+    - Claude Sonnet 4.6 -- balanced performance (STANDARD tier)
+    - Claude Opus 4.6   -- highest quality (PREMIUM tier)
 
 Usage::
 
@@ -20,7 +20,7 @@ Usage::
     provider = AnthropicProvider(tier=ModelTier.CHEAP)
 
     # Explicit model ID
-    provider = AnthropicProvider(model_id="claude-sonnet-4-20250514")
+    provider = AnthropicProvider(model_id="claude-sonnet-4-6")
 
     # Generate a completion
     response = provider.complete("Analyze this chess position...")

@@ -2,7 +2,7 @@
 LLM provider sub-package.
 
 Available providers:
-    - **AnthropicProvider** -- Claude models (Haiku, Sonnet 4, Opus).
+    - **AnthropicProvider** -- Claude models (Haiku 4.5, Sonnet 4.6, Opus 4.6).
       Fully implemented.
     - **OpenAI** -- GPT models.  Registered but not yet implemented.
     - **Local** -- Ollama / local models.  Registered but not yet

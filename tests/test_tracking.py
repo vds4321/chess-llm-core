@@ -19,7 +19,7 @@ class TestUsageRecord:
         record = UsageRecord(
             timestamp=datetime.now(),
             provider="anthropic",
-            model="claude-3-5-haiku-20241022",
+            model="claude-haiku-4-5-20251001",
             prompt_id="test_prompt",
             input_tokens=100,
             output_tokens=200,
@@ -103,7 +103,7 @@ class TestUsageTracker:
         """Test recording usage."""
         record = tracker.record(
             provider="anthropic",
-            model="claude-3-5-haiku-20241022",
+            model="claude-haiku-4-5-20251001",
             input_tokens=100,
             output_tokens=200,
             cost_usd=0.0005,

@@ -4,7 +4,8 @@ chess-llm-core -- Shared LLM abstraction layer for chess coaching applications.
 This package provides a provider-agnostic interface for working with large
 language models in the context of chess coaching.  It is the shared
 foundation used by `KasparChess <https://kasparchess.com>`_ and
-`YourChessDotComCoach <https://yourchessdotcomcoach.fly.dev>`_.
+`YourChessDotComCoach <https://yourchessdotcomcoach.fly.dev>`_
+(adult chess coaching).
 
 Key capabilities:
     - **Provider abstraction** -- protocol-based interface supporting

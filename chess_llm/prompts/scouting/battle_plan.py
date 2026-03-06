@@ -123,7 +123,7 @@ class BattlePlanPrompt(PromptTemplate):
 
     # -- Prompt metadata ----------------------------------------------------
     prompt_id: str = field(default="battle_plan", init=False)
-    version: str = field(default="1.0.0", init=False)
+    version: PromptVersion = field(default_factory=lambda: PromptVersion(1, 0, 0), init=False)
     recommended_tier: ModelTier = field(default=ModelTier.STANDARD, init=False)
 
     # -- Required parameters ------------------------------------------------
@@ -218,7 +218,7 @@ IMPORTANT: On Chess.com and Lichess, players do NOT get to choose their color - 
         """Return prompt metadata including both player identifiers."""
         return {
             "prompt_id": self.prompt_id,
-            "version": self.version,
+            "version": self.version.version_string,
             "recommended_tier": self.recommended_tier.value,
             "opponent": self.opponent_username,
             "player": self.player_username,

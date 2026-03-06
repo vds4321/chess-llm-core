@@ -18,7 +18,7 @@ Public API::
     provider = get_provider("anthropic", tier=ModelTier.CHEAP)
 
     # Explicit model ID
-    provider = get_provider("anthropic", model_id="claude-3-5-haiku-20241022")
+    provider = get_provider("anthropic", model_id="claude-haiku-4-5-20251001")
 
 Extending with custom providers::
 

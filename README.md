@@ -81,9 +81,9 @@ print(response.content)
 
 | Tier       | Use Case                    | Anthropic Model    | Cost (input/output per 1M tokens) |
 |------------|-----------------------------|--------------------|-----------------------------------|
-| `CHEAP`    | Extraction, classification  | Claude 3.5 Haiku   | $1.00 / $5.00                     |
-| `STANDARD` | Coaching, scouting, analysis| Claude Sonnet 4    | $3.00 / $15.00                    |
-| `PREMIUM`  | Comprehensive reports       | Claude 3 Opus      | $15.00 / $75.00                   |
+| `CHEAP`    | Extraction, classification  | Claude Haiku 4.5   | $1.00 / $5.00                     |
+| `STANDARD` | Coaching, scouting, analysis| Claude Sonnet 4.6  | $3.00 / $15.00                    |
+| `PREMIUM`  | Comprehensive reports       | Claude Opus 4.6    | $5.00 / $25.00                    |
 
 ## Prompt Templates
 
