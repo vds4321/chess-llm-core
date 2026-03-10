@@ -30,6 +30,7 @@ chess_llm/
 ├── providers/      # LLM provider implementations
 │   ├── base.py     # LLMProvider protocol, BaseLLMProvider ABC, response types
 │   ├── anthropic.py# Anthropic Claude implementation (production-ready)
+│   ├── openai.py   # OpenAI GPT implementation (production-ready)
 │   └── registry.py # Factory-based provider registration and lookup
 ├── prompts/        # Versioned prompt templates
 │   ├── base.py     # PromptTemplate ABC, PromptVersion, output parsing
@@ -72,18 +73,74 @@ prompt = MentorInsightsPrompt(
     progression=progression_data,
 )
 
-# Generate response
+# Generate response (sync)
 response = provider.complete(prompt.render())
 print(response.content)
 ```
 
+### Multi-Turn Messages
+
+```python
+# Use a messages list for multi-turn conversations
+response = provider.complete_messages([
+    {"role": "user", "content": "Analyze this opening: 1. e4 e5 2. Nf3 Nc6"},
+])
+```
+
+### Async API
+
+Both Anthropic and OpenAI providers have native async implementations (not thread-pool wrappers):
+
+```python
+import asyncio
+from chess_llm import get_provider, ModelTier
+
+async def main():
+    provider = get_provider("anthropic", tier=ModelTier.STANDARD)
+
+    # Async text completion
+    response = await provider.acomplete("Analyze this chess position...")
+
+    # Async multi-turn
+    response = await provider.acomplete_messages([
+        {"role": "user", "content": "What should I play after 1. d4?"},
+    ])
+
+asyncio.run(main())
+```
+
+### Vision (Image Analysis)
+
+Providers that support vision (Claude and GPT-4o) can analyze board positions:
+
+```python
+with open("board.png", "rb") as f:
+    image_data = f.read()
+
+response = provider.complete_with_images(
+    prompt="What is the best move in this position?",
+    images=[image_data],
+)
+```
+
 ## Model Tiers
 
-| Tier       | Use Case                    | Anthropic Model    | Cost (input/output per 1M tokens) |
+### Anthropic
+
+| Tier       | Use Case                    | Model              | Cost (input/output per 1M tokens) |
 |------------|-----------------------------|--------------------|-----------------------------------|
 | `CHEAP`    | Extraction, classification  | Claude Haiku 4.5   | $1.00 / $5.00                     |
 | `STANDARD` | Coaching, scouting, analysis| Claude Sonnet 4.6  | $3.00 / $15.00                    |
 | `PREMIUM`  | Comprehensive reports       | Claude Opus 4.6    | $5.00 / $25.00                    |
+
+### OpenAI
+
+| Tier       | Use Case                    | Model              | Cost (input/output per 1M tokens) |
+|------------|-----------------------------|--------------------|-----------------------------------|
+| `CHEAP`    | Extraction, classification  | GPT-4o Mini        | $0.15 / $0.60                     |
+| `STANDARD` | Coaching, scouting, analysis| GPT-4o             | $2.50 / $10.00                    |
+
+All models support vision (image inputs). Context windows: Anthropic 200K tokens, OpenAI 128K tokens.
 
 ## Prompt Templates
 
@@ -103,13 +160,86 @@ Set these environment variables to configure the library:
 
 | Variable                     | Description                      | Default      |
 |------------------------------|----------------------------------|--------------|
-| `ANTHROPIC_API_KEY`          | Anthropic API key                | *required*   |
-| `OPENAI_API_KEY`             | OpenAI API key (future use)      | —            |
+| `ANTHROPIC_API_KEY`          | Anthropic API key                | *required for Anthropic* |
+| `OPENAI_API_KEY`             | OpenAI API key                   | *required for OpenAI* |
 | `CHESS_LLM_DEFAULT_PROVIDER` | Default provider                 | `anthropic`  |
 | `CHESS_LLM_DEFAULT_TIER`     | Default tier                     | `standard`   |
 | `CHESS_LLM_TRACK_COSTS`      | Enable cost tracking             | `true`       |
+| `CHESS_LLM_LOG_REQUESTS`     | Log outgoing LLM requests        | `false`      |
+| `CHESS_LLM_LOG_RESPONSES`    | Log LLM responses                | `false`      |
+| `ANTHROPIC_API_BASE`         | Custom Anthropic API base URL    | —            |
+| `OPENAI_API_BASE`            | Custom OpenAI API base URL       | —            |
+
+### Per-Provider Settings
+
+Each provider also has configurable `timeout_seconds` (default 60), `max_retries` (default 3), and rate limits (`requests_per_minute` default 60, `tokens_per_minute` default 100K). A `cost_warning_threshold_usd` (default $1.00) logs warnings for expensive requests.
+
+Settings can also be configured programmatically:
+
+```python
+from chess_llm import get_settings, Settings
+
+# Read current settings
+settings = get_settings()
+
+# Or configure programmatically
+from chess_llm.config.settings import configure_settings, reset_settings
+configure_settings(custom_settings)
+reset_settings()  # clear cached singleton
+```
 
 See [`chess_llm/config/settings.py`](chess_llm/config/settings.py) for the full list.
+
+## Provider Registry
+
+```python
+from chess_llm import get_provider, list_providers, ModelTier
+from chess_llm.providers.registry import get_provider_for_tier, is_provider_available
+
+# List registered providers
+print(list_providers())  # ['anthropic', 'openai', 'local']
+
+# Check if a provider's SDK is installed
+if is_provider_available("openai"):
+    provider = get_provider("openai", tier=ModelTier.STANDARD)
+
+# Convenience: get provider by tier (uses default provider)
+provider = get_provider_for_tier(ModelTier.CHEAP)
+```
+
+### Model Lookup Helpers
+
+```python
+from chess_llm.config.models import (
+    get_model_config, get_default_model,
+    get_models_by_tier, get_cheapest_model,
+)
+
+# Get config for a tier+provider
+config = get_model_config(ModelTier.STANDARD, provider="anthropic")
+
+# Find cheapest model meeting requirements
+config = get_cheapest_model(min_quality=0.6, requires_vision=True)
+```
+
+## Error Handling
+
+All provider errors inherit from `ProviderError`:
+
+```python
+from chess_llm import ProviderError, RateLimitError, AuthenticationError, TokenLimitError
+
+try:
+    response = provider.complete("...")
+except RateLimitError as e:
+    print(f"Rate limited, retry after {e.retry_after}s")
+except AuthenticationError:
+    print("Invalid API key")
+except TokenLimitError as e:
+    print(f"Requested {e.requested_tokens} tokens, max is {e.max_tokens}")
+except ProviderError as e:
+    print(f"Provider error: {e}")
+```
 
 ## Usage Tracking
 
